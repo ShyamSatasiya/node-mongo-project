@@ -20,7 +20,6 @@ pipeline {
     stage('Fetch Artifact from CI') {
       steps {
         script {
-          // Fetch from CI job
           def sel = params.CI_BUILD_NUM?.trim() ? specific(params.CI_BUILD_NUM) : lastSuccessful()
           step([$class: 'CopyArtifact',
                 projectName: env.CI_JOB_NAME,
@@ -29,97 +28,68 @@ pipeline {
                 flatten: true,
                 fingerprintArtifacts: true])
         }
-        bat 'dir app.zip'
+        bat 'if not exist app.zip (echo Missing app.zip & exit /b 1) & dir app.zip'
       }
     }
 
-    stage('Azure Login') {
+    stage('Login, Configure, Deploy & Verify') {
       steps {
         withCredentials([
-          string(credentialsId: 'azure-client-id', variable: 'AZ_APPID'),
-          string(credentialsId: 'azure-client-secret', variable: 'AZ_PASS'),
-          string(credentialsId: 'azure-tenant-id', variable: 'AZ_TENANT'),
-          string(credentialsId: 'azure-subscription-id', variable: 'AZ_SUB')
+          string(credentialsId: 'AZURE_SP_APPID', variable: 'AZ_APPID'),
+          string(credentialsId: 'AZURE_SP_PASSWORD', variable: 'AZ_PASS'),
+          string(credentialsId: 'AZURE_TENANT_ID', variable: 'AZ_TENANT'),
+          string(credentialsId: 'AZURE_SUBSCRIPTION_ID', variable: 'AZ_SUB')
         ]) {
           bat '''
+            rem ===== Azure login =====
             az logout || exit /b 0
             az login --service-principal -u "%AZ_APPID%" -p "%AZ_PASS%" --tenant "%AZ_TENANT%" >nul
+            if errorlevel 1 exit /b 1
             az account set --subscription "%AZ_SUB%"
-            az account show
+            if errorlevel 1 exit /b 1
+            az account show || exit /b 1
+
+            rem ===== Resolve resource IDs (no RG needed later) =====
+            for /f "usebackq delims=" %%i in (`az webapp show --name "%APP_NAME%" --query id -o tsv`) do set APP_ID=%%i
+            for /f "usebackq delims=" %%h in (`az webapp show --name "%APP_NAME%" --query defaultHostName -o tsv`) do set FQDN=%%h
+            if not defined APP_ID (echo Could not resolve app resource id & exit /b 1)
+            if not defined FQDN (echo Could not resolve app hostname & exit /b 1)
+
+            rem ===== Disable Oryx build (we ship prebuilt node_modules) =====
+            az webapp config appsettings set --ids "%APP_ID%" --settings SCM_DO_BUILD_DURING_DEPLOYMENT=false
+            if errorlevel 1 exit /b 1
+
+            rem ===== Deploy ZIP via --ids =====
+            az webapp deploy --ids "%APP_ID%" --src-path app.zip --type zip
+            if errorlevel 1 exit /b 1
+
+            rem ===== Health check with retries =====
+            set COUNT=0
+            :retry
+            set /a COUNT+=1
+            curl -fsS "https://%FQDN%%HEALTH_PATH%" >nul 2>nul
+            if %errorlevel%==0 (
+              echo Health check OK at https://%FQDN%%HEALTH_PATH%
+              exit /b 0
+            ) else (
+              if %COUNT% LSS 10 (
+                echo Retry %COUNT%...
+                timeout /t 6 >nul
+                goto retry
+              ) else (
+                echo Health check failed at https://%FQDN%%HEALTH_PATH% >&2
+                exit /b 1
+              )
+            )
           '''
         }
       }
     }
-
-   stage('Set App Setting (skip Oryx build)') {
-  steps {
-    bat '''
-      for /f "usebackq tokens=1,2 delims==" %%a in (`type rg_env.txt`) do set %%a=%%b
-      echo Setting SCM_DO_BUILD_DURING_DEPLOYMENT=false on %APP_NAME% (RG: %RG_NAME%)
-      az webapp config appsettings set --name "%APP_NAME%" --resource-group "%RG_NAME%" --settings SCM_DO_BUILD_DURING_DEPLOYMENT=false
-      if errorlevel 1 exit /b 1
-    '''
-  }
-    }
-
-stage('Deploy to Azure Web App') {
-  steps {
-    bat '''
-      for /f "usebackq tokens=1,2 delims==" %%a in (`type rg_env.txt`) do set %%a=%%b
-      if not exist app.zip (
-        echo Missing app.zip in workspace >&2
-        exit /b 1
-      )
-      echo Deploying app.zip to %APP_NAME% (RG: %RG_NAME%)
-      az webapp deploy --name "%APP_NAME%" --resource-group "%RG_NAME%" --src-path app.zip --type zip
-      if errorlevel 1 exit /b 1
-    '''
-  }
-}
-
-stage('Verify Health') {
-  steps {
-    bat '''
-      setlocal
-      for /f "usebackq delims=" %%h in (`az webapp show --name "%APP_NAME%" --query defaultHostName -o tsv`) do set FQDN=%%h
-      if not defined FQDN (
-        echo Could not resolve app hostname >&2
-        exit /b 1
-      )
-      echo Health check: https://%FQDN%%HEALTH_PATH%
-
-      set /a COUNT=0
-      :retry
-      set /a COUNT+=1
-      curl -fsS "https://%FQDN%%HEALTH_PATH%" >nul 2>nul
-      if %errorlevel%==0 (
-        echo Health check OK
-        exit /b 0
-      ) else (
-        if %COUNT% LSS 10 (
-          echo Retry %COUNT%...
-          timeout /t 6 >nul
-          goto retry
-        ) else (
-          echo Health check failed >&2
-          exit /b 1
-        )
-      )
-    '''
-  }
-}
-
   }
 
   post {
-    always {
-      bat 'az logout || exit /b 0'
-    }
-    success {
-      echo "Deployment succeeded & health check passed."
-    }
-    failure {
-      echo "Deployment failed. Check logs."
-    }
+    always { bat 'az logout || exit /b 0' }
+    success { echo 'Deployment succeeded & health check passed.' }
+    failure { echo 'Deployment failed. See logs above.' }
   }
 }
