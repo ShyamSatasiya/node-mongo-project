@@ -7,12 +7,13 @@ pipeline {
   }
 
   tools {
-    nodejs 'node18'
+    nodejs 'node18'     // Manage Jenkins → Global Tool Configuration → NodeJS
   }
 
   environment {
-    REPO_URL = 'https://github.com/Azure-Samples/msdocs-nodejs-mongodb-azure-sample-app.git'
-    APP_NAME = 'node-mongo-sample-webapp' // must match Terraform var.app_name
+    REPO_URL   = 'https://github.com/Azure-Samples/msdocs-nodejs-mongodb-azure-sample-app.git'
+    APP_NAME   = 'node-mongo-sample-webapp'
+    ARTIFACT   = 'dist\\app.zip'
   }
 
   stages {
@@ -22,51 +23,69 @@ pipeline {
       }
     }
 
-    stage('Install') {
+    stage('Node & NPM versions') {
       steps {
         bat '''
-          call npm ci
+          node -v
+          npm -v
         '''
       }
     }
 
-    stage('Build') {
+    stage('Install') {
       steps {
-        // If the sample has no build step, this is a no-op
+        // If this fails, we DO want the build to fail
+        bat 'call npm ci'
+      }
+    }
+
+    stage('Build (optional)') {
+      steps {
         bat '''
-          call npm run > npm_scripts.txt
-          findstr /i "build" npm_scripts.txt >nul
+          call npm run > npm_scripts.txt || exit /b 0
+          findstr /i "^  build" npm_scripts.txt >nul
           if %errorlevel%==0 (
-            call npm run build
+            echo Found a build script. Running: npm run build
+            call npm run build || exit /b 1
           ) else (
             echo No build script found. Skipping.
           )
+          exit /b 0
         '''
       }
     }
 
-    stage('Test') {
+    stage('Test (optional)') {
       steps {
-        // If the sample has tests they'll run; otherwise this skips gracefully
+        // If tests exist, run them. If not, don't fail the build.
         bat '''
-          call npm run > npm_scripts.txt
-          findstr /i "test" npm_scripts.txt >nul
+          call npm run > npm_scripts.txt || exit /b 0
+          findstr /i "^  test" npm_scripts.txt >nul
           if %errorlevel%==0 (
-            call npm test
+            echo Found a test script. Running: npm test
+            call npm test || exit /b 1
           ) else (
             echo No test script found. Skipping.
           )
+          exit /b 0
         '''
       }
     }
 
     stage('Package') {
       steps {
+        // Zip everything EXCEPT node_modules (Oryx will build on deploy)
         bat '''
           if exist dist rmdir /s /q dist
           mkdir dist
-          rem Zip the whole workspace except junk; Oryx will build on the server
-          powershell Compress-Archive -Path * -DestinationPath dist\\app.zip -Force -CompressionLevel Optimal
+
+          rem Remove node_modules to keep artifact small
+          if exist node_modules rmdir /s /q node_modules
+
+          rem Create ZIP via PowerShell (Windows built-in)
+          powershell -NoProfile -Command ^
+            "Compress-Archive -Path * -DestinationPath '%ARTIFACT%' -Force -CompressionLevel Optimal"
+
           dir dist
         '''
       }
@@ -81,7 +100,10 @@ pipeline {
 
   post {
     success {
-      echo "CI complete. Artifact published: dist/app.zip"
+      echo "CI complete. Artifact published: ${env.ARTIFACT}"
+    }
+    failure {
+      echo "CI failed — check the stage logs above."
     }
   }
 }
