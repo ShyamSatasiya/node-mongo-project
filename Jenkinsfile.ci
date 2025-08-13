@@ -1,0 +1,86 @@
+pipeline {
+  agent any
+
+  options {
+    timestamps()
+    buildDiscarder(logRotator(numToKeepStr: '15'))
+  }
+
+  tools {
+    nodejs 'node18'
+  }
+
+  environment {
+    REPO_URL = 'https://github.com/Azure-Samples/msdocs-nodejs-mongodb-azure-sample-app.git'
+    APP_NAME = 'node-mongo-sample-webapp' // must match Terraform var.app_name
+  }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        git url: "${env.REPO_URL}", branch: 'main'
+      }
+    }
+
+    stage('Install') {
+      steps {
+        sh '''
+          set -e
+          npm ci
+        '''
+      }
+    }
+
+    stage('Build') {
+      steps {
+        // If the sample has no build step, this is a no-op
+        sh '''
+          set -e
+          if npm run | grep -q "build"; then
+            npm run build
+          else
+            echo "No build script found. Skipping."
+          fi
+        '''
+      }
+    }
+
+    stage('Test') {
+      steps {
+        // If the sample has tests they'll run; otherwise this skips gracefully
+        sh '''
+          set -e
+          if npm run | grep -q "test"; then
+            npm test
+          else
+            echo "No test script found. Skipping."
+          fi
+        '''
+      }
+    }
+
+    stage('Package') {
+      steps {
+        sh '''
+          set -e
+          rm -rf dist && mkdir -p dist
+          # Zip the whole workspace except junk; Oryx will build on the server
+          zip -r dist/app.zip . -x "*.git*" "dist/*" "node_modules/*" ".DS_Store"
+          ls -lh dist/
+        '''
+      }
+    }
+
+    stage('Publish Artifact') {
+      steps {
+        archiveArtifacts artifacts: 'dist/app.zip', fingerprint: true
+      }
+    }
+  }
+
+  post {
+    success {
+      echo "CI complete. Artifact published: dist/app.zip"
+    }
+  }
+}
