@@ -11,7 +11,7 @@ pipeline {
   }
 
   environment {
-    CI_JOB_NAME = 'node-mongo-ci'             // name of your CI job
+    CI_JOB_NAME = 'Node-mongo-webapp'             // name of your CI job
     APP_NAME    = 'node-mongo-sample-webapp'  // must match Terraform var.app_name
     HEALTH_PATH = '/'                         // change if you have /health route
   }
