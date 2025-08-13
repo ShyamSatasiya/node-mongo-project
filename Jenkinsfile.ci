@@ -25,8 +25,7 @@ pipeline {
     stage('Install') {
       steps {
         bat '''
-          set -e
-          npm ci
+          call npm ci
         '''
       }
     }
@@ -35,12 +34,13 @@ pipeline {
       steps {
         // If the sample has no build step, this is a no-op
         bat '''
-          set -e
-          if npm run | grep -q "build"; then
-            npm run build
-          else
-            echo "No build script found. Skipping."
-          fi
+          call npm run > npm_scripts.txt
+          findstr /i "build" npm_scripts.txt >nul
+          if %errorlevel%==0 (
+            call npm run build
+          ) else (
+            echo No build script found. Skipping.
+          )
         '''
       }
     }
@@ -49,12 +49,13 @@ pipeline {
       steps {
         // If the sample has tests they'll run; otherwise this skips gracefully
         bat '''
-          set -e
-          if npm run | grep -q "test"; then
-            npm test
-          else
-            echo "No test script found. Skipping."
-          fi
+          call npm run > npm_scripts.txt
+          findstr /i "test" npm_scripts.txt >nul
+          if %errorlevel%==0 (
+            call npm test
+          ) else (
+            echo No test script found. Skipping.
+          )
         '''
       }
     }
@@ -62,11 +63,11 @@ pipeline {
     stage('Package') {
       steps {
         bat '''
-          set -e
-          rm -rf dist && mkdir -p dist
-          # Zip the whole workspace except junk; Oryx will build on the server
-          zip -r dist/app.zip . -x "*.git*" "dist/*" "node_modules/*" ".DS_Store"
-          ls -lh dist/
+          if exist dist rmdir /s /q dist
+          mkdir dist
+          rem Zip the whole workspace except junk; Oryx will build on the server
+          powershell Compress-Archive -Path * -DestinationPath dist\\app.zip -Force -CompressionLevel Optimal
+          dir dist
         '''
       }
     }
