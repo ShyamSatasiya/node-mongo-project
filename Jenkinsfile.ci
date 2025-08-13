@@ -7,48 +7,63 @@ pipeline {
   }
 
   tools {
-    nodejs 'node18'     // Manage Jenkins → Global Tool Configuration → NodeJS
+    nodejs 'node18'   // Manage Jenkins → Global Tool Configuration → NodeJS
   }
 
   environment {
-    REPO_URL   = 'https://github.com/Azure-Samples/msdocs-nodejs-mongodb-azure-sample-app.git'
-    APP_NAME   = 'node-mongo-sample-webapp'
-    ARTIFACT   = 'dist\\app.zip'
+    REPO_URL = 'https://github.com/Azure-Samples/msdocs-nodejs-mongodb-azure-sample-app.git'
+    ARTIFACT = 'dist\\app.zip'
   }
 
   stages {
     stage('Checkout') {
-      steps {
-        git url: "${env.REPO_URL}", branch: 'main'
-      }
+      steps { git url: "${env.REPO_URL}", branch: 'main' }
     }
 
     stage('Node & NPM versions') {
+      steps { bat 'node -v && npm -v' }
+    }
+
+    stage('Prepare build workspace') {
       steps {
         bat '''
-          node -v
-          npm -v
+          if exist build rmdir /s /q build
+          if exist dist rmdir /s /q dist
+          mkdir build
+          mkdir dist
+
+          rem copy source into build/ (exclude junk & previous outputs)
+          robocopy . build /MIR ^
+            /XD build dist .git .github .devcontainer infra ^
+            /XF .gitignore .gitattributes || exit /b 0
         '''
       }
     }
 
-    stage('Install') {
+    stage('Install deps (production-ready)') {
       steps {
-        // If this fails, we DO want the build to fail
-        bat 'call npm ci'
+        bat '''
+          cd build
+          rem clean, deterministic install for CI
+          call npm ci
+          rem if there are devDeps, drop them to create a prod bundle
+          call npm prune --omit=dev
+        '''
       }
     }
 
     stage('Build (optional)') {
       steps {
         bat '''
-          call npm run > npm_scripts.txt || exit /b 0
-          findstr /i "^  build" npm_scripts.txt >nul
+          cd build
+          rem run build only if package.json defines it
+          powershell -NoProfile -Command ^
+            "$s=(Get-Content package.json | ConvertFrom-Json).scripts; if($s -and ($s.PSObject.Properties.Name -contains 'build')){ exit 0 } else { exit 100 }"
           if %errorlevel%==0 (
-            echo Found a build script. Running: npm run build
+            echo Found build script; running: npm run build
             call npm run build || exit /b 1
           ) else (
-            echo No build script found. Skipping.
+            echo No build script; continuing.
           )
           exit /b 0
         '''
@@ -57,15 +72,15 @@ pipeline {
 
     stage('Test (optional)') {
       steps {
-        // If tests exist, run them. If not, don't fail the build.
         bat '''
-          call npm run > npm_scripts.txt || exit /b 0
-          findstr /i "^  test" npm_scripts.txt >nul
+          cd build
+          powershell -NoProfile -Command ^
+            "$s=(Get-Content package.json | ConvertFrom-Json).scripts; if($s -and ($s.PSObject.Properties.Name -contains 'test')){ exit 0 } else { exit 100 }"
           if %errorlevel%==0 (
-            echo Found a test script. Running: npm test
+            echo Found test script; running: npm test
             call npm test || exit /b 1
           ) else (
-            echo No test script found. Skipping.
+            echo No test script; continuing.
           )
           exit /b 0
         '''
@@ -74,36 +89,22 @@ pipeline {
 
     stage('Package') {
       steps {
-        // Zip everything EXCEPT node_modules (Oryx will build on deploy)
         bat '''
-          if exist dist rmdir /s /q dist
-          mkdir dist
-
-          rem Remove node_modules to keep artifact small
-          if exist node_modules rmdir /s /q node_modules
-
-          rem Create ZIP via PowerShell (Windows built-in)
+          rem zip the *built* app with production node_modules
           powershell -NoProfile -Command ^
-            "Compress-Archive -Path * -DestinationPath '%ARTIFACT%' -Force -CompressionLevel Optimal"
-
+            "Compress-Archive -Path 'build\\*' -DestinationPath '%ARTIFACT%' -Force -CompressionLevel Optimal"
           dir dist
         '''
       }
     }
 
     stage('Publish Artifact') {
-      steps {
-        archiveArtifacts artifacts: 'dist/app.zip', fingerprint: true
-      }
+      steps { archiveArtifacts artifacts: 'dist/app.zip', fingerprint: true }
     }
   }
 
   post {
-    success {
-      echo "CI complete. Artifact published: ${env.ARTIFACT}"
-    }
-    failure {
-      echo "CI failed — check the stage logs above."
-    }
+    success { echo "CI complete. Artifact published: ${env.ARTIFACT}" }
+    failure { echo "CI failed — check logs." }
   }
 }
