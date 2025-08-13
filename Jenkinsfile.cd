@@ -53,43 +53,67 @@ pipeline {
     }
 
     stage('Configure, Deploy & Verify') {
-      steps {
-        bat '''
-          rem ===== Resolve resource IDs (no RG needed later) =====
-          for /f "usebackq delims=" %%i in (`az webapp show --name "%APP_NAME%" --query id -o tsv`) do set APP_ID=%%i
-          for /f "usebackq delims=" %%h in (`az webapp show --name "%APP_NAME%" --query defaultHostName -o tsv`) do set FQDN=%%h
-          if not defined APP_ID (echo Could not resolve app resource id & exit /b 1)
-          if not defined FQDN (echo Could not resolve app hostname & exit /b 1)
+  steps {
+    bat '''
+      rem ===== Resolve app from subscription (no RG needed up front) =====
+      for /f "usebackq delims=" %%i in (`az webapp list --query "[?name=='%APP_NAME%'] | [0].id" -o tsv`) do set APP_ID=%%i
+      for /f "usebackq delims=" %%r in (`az webapp list --query "[?name=='%APP_NAME%'] | [0].resourceGroup" -o tsv`) do set RG_NAME=%%r
+      for /f "usebackq delims=" %%h in (`az webapp list --query "[?name=='%APP_NAME%'] | [0].defaultHostName" -o tsv`) do set FQDN=%%h
 
-          rem ===== Disable Oryx build (artifact already includes node_modules) =====
-          az webapp config appsettings set --ids "%APP_ID%" --settings SCM_DO_BUILD_DURING_DEPLOYMENT=false
-          if errorlevel 1 exit /b 1
+      if not defined APP_ID (
+        echo Could not resolve app by name "%APP_NAME%" in this subscription. Check name/subscription/permissions. >&2
+        echo Debug listing (first 5 apps): 
+        az webapp list --query "[].{name:name, rg:resourceGroup}" -o table | more +2
+        exit /b 1
+      )
 
-          rem ===== Deploy ZIP via --ids =====
-          az webapp deploy --ids "%APP_ID%" --src-path app.zip --type zip
-          if errorlevel 1 exit /b 1
+      echo Resolved: 
+      echo   APP_ID = %APP_ID%
+      echo   RG_NAME= %RG_NAME%
+      echo   FQDN   = %FQDN%
 
-          rem ===== Health check with retries =====
-          set COUNT=0
-          :retry
-          set /a COUNT+=1
-          curl -fsS "https://%FQDN%%HEALTH_PATH%" >nul 2>nul
-          if %errorlevel%==0 (
-            echo Health check OK at https://%FQDN%%HEALTH_PATH%
-            exit /b 0
-          ) else (
-            if %COUNT% LSS 10 (
-              echo Retry %COUNT%...
-              timeout /t 6 >nul
-              goto retry
-            ) else (
-              echo Health check failed at https://%FQDN%%HEALTH_PATH% >&2
-              exit /b 1
-            )
-          )
-        '''
-      }
-    }
+      rem ===== Disable Oryx build (artifact already includes node_modules) =====
+      az webapp config appsettings set --ids "%APP_ID%" --settings SCM_DO_BUILD_DURING_DEPLOYMENT=false
+      if errorlevel 1 exit /b 1
+
+      rem ===== Deploy ZIP via --ids =====
+      if not exist app.zip (
+        echo Missing app.zip in workspace >&2
+        exit /b 1
+      )
+      az webapp deploy --ids "%APP_ID%" --src-path app.zip --type zip
+      if errorlevel 1 exit /b 1
+
+      rem ===== Health check with retries =====
+      if not defined FQDN (
+        for /f "usebackq delims=" %%h in (`az webapp show --ids "%APP_ID%" --query defaultHostName -o tsv`) do set FQDN=%%h
+      )
+      if not defined FQDN (
+        echo Could not resolve app hostname >&2
+        exit /b 1
+      )
+
+      set COUNT=0
+      :retry
+      set /a COUNT+=1
+      curl -fsS "https://%FQDN%%HEALTH_PATH%" >nul 2>nul
+      if %errorlevel%==0 (
+        echo Health check OK at https://%FQDN%%HEALTH_PATH%
+        exit /b 0
+      ) else (
+        if %COUNT% LSS 10 (
+          echo Retry %COUNT%...
+          timeout /t 6 >nul
+          goto retry
+        ) else (
+          echo Health check failed at https://%FQDN%%HEALTH_PATH% >&2
+          exit /b 1
+        )
+      )
+    '''
+  }
+}
+
   }
 
   post {
