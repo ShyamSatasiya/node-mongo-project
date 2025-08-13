@@ -51,53 +51,64 @@ pipeline {
       }
     }
 
-    stage('Set App Setting (skip Oryx build)') {
-      steps {
-        bat '''
-          set RG_NAME=
-          for /f "delims=" %%r in ('az webapp show --name "%APP_NAME%" --query resourceGroup -o tsv') do set RG_NAME=%%r
-          echo Setting SCM_DO_BUILD_DURING_DEPLOYMENT=false
-          az webapp config appsettings set --name "%APP_NAME%" --resource-group "%RG_NAME%" --settings SCM_DO_BUILD_DURING_DEPLOYMENT=false
-        '''
-      }
+   stage('Set App Setting (skip Oryx build)') {
+  steps {
+    bat '''
+      for /f "usebackq tokens=1,2 delims==" %%a in (`type rg_env.txt`) do set %%a=%%b
+      echo Setting SCM_DO_BUILD_DURING_DEPLOYMENT=false on %APP_NAME% (RG: %RG_NAME%)
+      az webapp config appsettings set --name "%APP_NAME%" --resource-group "%RG_NAME%" --settings SCM_DO_BUILD_DURING_DEPLOYMENT=false
+      if errorlevel 1 exit /b 1
+    '''
+  }
     }
 
-    stage('Deploy to Azure Web App') {
-      steps {
-        bat '''
-          set RG_NAME=
-          for /f "delims=" %%r in ('az webapp show --name "%APP_NAME%" --query resourceGroup -o tsv') do set RG_NAME=%%r
-          echo Deploying prebuilt app.zip to %APP_NAME%
-          az webapp deploy --name "%APP_NAME%" --resource-group "%RG_NAME%" --src-path app.zip --type zip
-        '''
-      }
-    }
+stage('Deploy to Azure Web App') {
+  steps {
+    bat '''
+      for /f "usebackq tokens=1,2 delims==" %%a in (`type rg_env.txt`) do set %%a=%%b
+      if not exist app.zip (
+        echo Missing app.zip in workspace >&2
+        exit /b 1
+      )
+      echo Deploying app.zip to %APP_NAME% (RG: %RG_NAME%)
+      az webapp deploy --name "%APP_NAME%" --resource-group "%RG_NAME%" --src-path app.zip --type zip
+      if errorlevel 1 exit /b 1
+    '''
+  }
+}
 
-    stage('Verify Health') {
-      steps {
-        bat '''
-          set FQDN=
-          for /f "delims=" %%h in ('az webapp show --name "%APP_NAME%" --query defaultHostName -o tsv') do set FQDN=%%h
-          echo Health check: https://%FQDN%%HEALTH_PATH%
-          set /a count=0
-          :retry
-          set /a count+=1
-          curl -fsS "https://%FQDN%%HEALTH_PATH%" >nul 2>nul
-          if %errorlevel%==0 (
-            echo Health check OK
-          ) else (
-            if %count% LSS 10 (
-              echo Retry %count%...
-              timeout /t 6 >nul
-              goto retry
-            ) else (
-              echo Health check failed
-              exit /b 1
-            )
-          )
-        '''
-      }
-    }
+stage('Verify Health') {
+  steps {
+    bat '''
+      setlocal
+      for /f "usebackq delims=" %%h in (`az webapp show --name "%APP_NAME%" --query defaultHostName -o tsv`) do set FQDN=%%h
+      if not defined FQDN (
+        echo Could not resolve app hostname >&2
+        exit /b 1
+      )
+      echo Health check: https://%FQDN%%HEALTH_PATH%
+
+      set /a COUNT=0
+      :retry
+      set /a COUNT+=1
+      curl -fsS "https://%FQDN%%HEALTH_PATH%" >nul 2>nul
+      if %errorlevel%==0 (
+        echo Health check OK
+        exit /b 0
+      ) else (
+        if %COUNT% LSS 10 (
+          echo Retry %COUNT%...
+          timeout /t 6 >nul
+          goto retry
+        ) else (
+          echo Health check failed >&2
+          exit /b 1
+        )
+      )
+    '''
+  }
+}
+
   }
 
   post {
