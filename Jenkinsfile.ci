@@ -24,7 +24,7 @@ pipeline {
 
     stage('Install') {
       steps {
-        sh '''
+        bat '''
           set -e
           npm ci
         '''
@@ -34,7 +34,7 @@ pipeline {
     stage('Build') {
       steps {
         // If the sample has no build step, this is a no-op
-        sh '''
+        bat '''
           set -e
           if npm run | grep -q "build"; then
             npm run build
@@ -48,7 +48,7 @@ pipeline {
     stage('Test') {
       steps {
         // If the sample has tests they'll run; otherwise this skips gracefully
-        sh '''
+        bat '''
           set -e
           if npm run | grep -q "test"; then
             npm test
@@ -61,7 +61,7 @@ pipeline {
 
     stage('Package') {
       steps {
-        sh '''
+        bat '''
           set -e
           rm -rf dist && mkdir -p dist
           # Zip the whole workspace except junk; Oryx will build on the server
