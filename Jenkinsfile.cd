@@ -36,9 +36,9 @@ pipeline {
           Compress-Archive -Path "$tempPath\\*" -DestinationPath "app.zip" -Force
 
           if (Test-Path "app.zip") {
-            Write-Host "✅ app.zip created correctly."
+            Write-Host "app.zip created correctly."
           } else {
-            Write-Error "❌ Failed to create app.zip"
+            Write-Error "Failed to create app.zip"
             exit 1
           }
         '''
