@@ -13,38 +13,40 @@ pipeline {
 
   stages {
 
-    stage('Prepare Cross-platform ZIP') {
-      steps {
-        powershell '''
-          Write-Host "📦 Creating ZIP file for deployment..."
+stage('Prepare Cross-platform ZIP') {
+  steps {
+    powershell '''
+      Write-Host "Creating ZIP file for deployment..."
 
-          Remove-Item -Force app.zip -ErrorAction SilentlyContinue
+      Remove-Item -Force app.zip -ErrorAction SilentlyContinue
 
-          $sourcePath = "$PWD\\dist"
-          $tempPath = "$env:TEMP\\zipfix"
-          Remove-Item -Recurse -Force $tempPath -ErrorAction SilentlyContinue
-          New-Item -ItemType Directory -Path $tempPath | Out-Null
+      $sourcePath = "$PWD\\dist"
+      $tempPath = "$env:TEMP\\zipfix"
+      Remove-Item -Recurse -Force $tempPath -ErrorAction SilentlyContinue
+      New-Item -ItemType Directory -Path $tempPath | Out-Null
 
-          Get-ChildItem -Recurse -File -Path $sourcePath | ForEach-Object {
-            $relativePath = $_.FullName.Substring($sourcePath.Length + 1) -replace '\\\\', '/'
-            $destPath = Join-Path $tempPath $relativePath
-            $destDir = Split-Path $destPath
-            if (-not (Test-Path $destDir)) {
-              New-Item -ItemType Directory -Path $destDir -Force | Out-Null
-            }
-            Copy-Item $_.FullName -Destination $destPath
-          }
-
-          Compress-Archive -Path "$tempPath\\*" -DestinationPath "app.zip" -Force
-          if (Test-Path "app.zip") {
-            Write-Host "✅ app.zip created successfully."
-          } else {
-            Write-Error "❌ Failed to create app.zip"
-            exit 1
-          }
-        '''
+      Get-ChildItem -Recurse -File -Path $sourcePath | ForEach-Object {
+        $relativePath = $_.FullName.Substring($sourcePath.Length + 1) -replace '\\\\', '/'
+        $destPath = Join-Path $tempPath $relativePath
+        $destDir = Split-Path $destPath
+        if (-not (Test-Path $destDir)) {
+          New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+        }
+        Copy-Item $_.FullName -Destination $destPath
       }
-    }
+
+      Compress-Archive -Path "$tempPath\\*" -DestinationPath "app.zip" -Force
+
+      if (Test-Path "app.zip") {
+        Write-Host "app.zip created successfully."
+      } else {
+        Write-Host "[ERROR] Failed to create app.zip"
+        exit 1
+      }
+    '''
+  }
+}
+
 
     stage('Verify and Deploy to Azure') {
       steps {
