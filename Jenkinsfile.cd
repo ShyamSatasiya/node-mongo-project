@@ -15,7 +15,7 @@ pipeline {
     stage('Download Artifact from CI') {
       steps {
         copyArtifacts(
-          projectName: 'node-mongo-ci',    // 🔁 CHANGE THIS IF YOUR CI JOB NAME DIFFERS
+          projectName: 'Node-mongo-webapp',    // 🔁 CHANGE THIS IF YOUR CI JOB NAME DIFFERS
           selector: lastSuccessful(),
           filter: 'dist/app.zip',
           target: '.'
