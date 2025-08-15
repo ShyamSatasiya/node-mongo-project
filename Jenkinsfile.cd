@@ -7,11 +7,45 @@ pipeline {
     RG_NAME = "rg-node-mongo-jenkins"
     PLAN_NAME = "node-mongo-sample-webapp-plan"
     LOCATION = "canadacentral"
-    ZIP_SOURCE = "dist\\app.zip"
+    ZIP_SOURCE = "app.zip"
     HEALTH_PATH = "/"
   }
 
   stages {
+
+    stage('Prepare Cross-platform ZIP') {
+      steps {
+        powershell '''
+          Write-Host "📦 Creating ZIP file for deployment..."
+
+          Remove-Item -Force app.zip -ErrorAction SilentlyContinue
+
+          $sourcePath = "$PWD\\dist"
+          $tempPath = "$env:TEMP\\zipfix"
+          Remove-Item -Recurse -Force $tempPath -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $tempPath | Out-Null
+
+          Get-ChildItem -Recurse -File -Path $sourcePath | ForEach-Object {
+            $relativePath = $_.FullName.Substring($sourcePath.Length + 1) -replace '\\\\', '/'
+            $destPath = Join-Path $tempPath $relativePath
+            $destDir = Split-Path $destPath
+            if (-not (Test-Path $destDir)) {
+              New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+            }
+            Copy-Item $_.FullName -Destination $destPath
+          }
+
+          Compress-Archive -Path "$tempPath\\*" -DestinationPath "app.zip" -Force
+          if (Test-Path "app.zip") {
+            Write-Host "✅ app.zip created successfully."
+          } else {
+            Write-Error "❌ Failed to create app.zip"
+            exit 1
+          }
+        '''
+      }
+    }
+
     stage('Verify and Deploy to Azure') {
       steps {
         withCredentials([
@@ -23,13 +57,10 @@ pipeline {
           bat '''
             setlocal EnableExtensions EnableDelayedExpansion
 
+            echo 🔐 Logging in to Azure...
+
             rem ===== Setup Azure config dir =====
             if not exist "%AZURE_CONFIG_DIR%" mkdir "%AZURE_CONFIG_DIR%"
-
-            rem ===== Sanity check =====
-            echo AZ_APPID=%AZ_APPID:~0,4%****
-            echo AZ_TENANT=%AZ_TENANT:~0,4%****
-            echo AZ_SUB=%AZ_SUB:~0,4%****
 
             rem ===== Login to Azure =====
             call az login --service-principal -u "%AZ_APPID%" -p "%AZ_PASS%" --tenant "%AZ_TENANT%" || exit /b 1
@@ -47,6 +78,8 @@ pipeline {
               exit /b 1
             )
 
+            echo 🚀 Deploying to Azure Web App...
+
             rem ===== Deploy ZIP to Azure =====
             call az webapp deployment source config-zip ^
               --resource-group "%RG_NAME%" ^
@@ -55,7 +88,7 @@ pipeline {
 
             rem ===== Show App URL =====
             set APP_URL=https://%APP_NAME%.azurewebsites.net%HEALTH_PATH%
-            echo Deployed to: !APP_URL!
+            echo ✅ Deployed to: !APP_URL!
           '''
         }
       }
@@ -70,7 +103,7 @@ pipeline {
       echo "✅ Deployment succeeded!"
     }
     failure {
-      echo "❌ Deployment failed."
+      echo "❌ Deployment failed. Check Jenkins logs."
     }
   }
 }
