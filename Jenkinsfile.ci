@@ -7,32 +7,34 @@ pipeline {
   }
 
   tools {
-    nodejs 'node18'   // Manage Jenkins → Global Tool Configuration → NodeJS
+    nodejs 'node18'
   }
 
   environment {
     REPO_URL = 'https://github.com/Azure-Samples/msdocs-nodejs-mongodb-azure-sample-app.git'
-    ARTIFACT = 'dist\\app.zip'
+    ARTIFACT = 'dist/app.zip' // forward slashes for compatibility
   }
 
   stages {
     stage('Checkout') {
-      steps { git url: "${env.REPO_URL}", branch: 'main' }
+      steps {
+        git url: "${env.REPO_URL}", branch: 'main'
+      }
     }
 
     stage('Node & NPM versions') {
-      steps { bat 'node -v && npm -v' }
+      steps {
+        bat 'node -v && npm -v'
+      }
     }
 
-    stage('Prepare build workspace') {
+    stage('Prepare build') {
       steps {
         bat '''
           if exist build rmdir /s /q build
           if exist dist rmdir /s /q dist
           mkdir build
           mkdir dist
-
-          rem copy source into build/ (exclude junk & previous outputs)
           robocopy . build /MIR ^
             /XD build dist .git .github .devcontainer infra ^
             /XF .gitignore .gitattributes || exit /b 0
@@ -40,13 +42,11 @@ pipeline {
       }
     }
 
-    stage('Install deps (production-ready)') {
+    stage('Install production deps') {
       steps {
         bat '''
           cd build
-          rem clean, deterministic install for CI
           call npm ci
-          rem if there are devDeps, drop them to create a prod bundle
           call npm prune --omit=dev
         '''
       }
@@ -56,7 +56,6 @@ pipeline {
       steps {
         bat '''
           cd build
-          rem run build only if package.json defines it
           powershell -NoProfile -Command ^
             "$s=(Get-Content package.json | ConvertFrom-Json).scripts; if($s -and ($s.PSObject.Properties.Name -contains 'build')){ exit 0 } else { exit 100 }"
           if %errorlevel%==0 (
@@ -87,24 +86,34 @@ pipeline {
       }
     }
 
-    stage('Package') {
+    stage('Package ZIP for Azure') {
       steps {
+        // ✅ Use 7-Zip to avoid Windows metadata in Compress-Archive
         bat '''
-          rem zip the *built* app with production node_modules
-          powershell -NoProfile -Command ^
-            "Compress-Archive -Path 'build\\*' -DestinationPath '%ARTIFACT%' -Force -CompressionLevel Optimal"
+          if exist "C:\\Program Files\\7-Zip\\7z.exe" (
+            "C:\\Program Files\\7-Zip\\7z.exe" a -tzip %ARTIFACT% .\\build\\* || exit /b 1
+          ) else (
+            echo [ERROR] 7-Zip is not installed. Please install it or use Compress-Archive.
+            exit /b 1
+          )
           dir dist
         '''
       }
     }
 
     stage('Publish Artifact') {
-      steps { archiveArtifacts artifacts: 'dist/app.zip', fingerprint: true }
+      steps {
+        archiveArtifacts artifacts: "${env.ARTIFACT}", fingerprint: true
+      }
     }
   }
 
   post {
-    success { echo "CI complete. Artifact published: ${env.ARTIFACT}" }
-    failure { echo "CI failed — check logs." }
+    success {
+      echo "✅ CI complete. Artifact ready for Azure: ${env.ARTIFACT}"
+    }
+    failure {
+      echo "❌ CI failed — check build log."
+    }
   }
 }
