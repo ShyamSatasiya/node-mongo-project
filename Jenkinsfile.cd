@@ -12,19 +12,36 @@ pipeline {
   }
 
   stages {
-    stage('Package App into ZIP') {
-      steps {
-        bat '''
-          rem Clean old zip
-          if exist app.zip del /f /q app.zip
+  stage('Package App into ZIP') {
+  steps {
+    bat '''
+      rem Clean old zip
+      if exist app.zip del /f /q app.zip
 
-          rem Zip contents of build/ directory
-          cd build
-          powershell -NoProfile -Command "Compress-Archive -Path * -DestinationPath ../app.zip -Force"
-          cd ..
-        '''
-      }
-    }
+      rem Check if build folder exists
+      if not exist build (
+        echo [ERROR] build directory does not exist
+        dir
+        exit /b 1
+      )
+
+      rem Create zip from build contents
+      powershell -NoProfile -Command ^
+        "Compress-Archive -Path 'build\\*' -DestinationPath 'app.zip' -Force"
+
+      rem Confirm zip was created
+      if exist app.zip (
+        echo ✅ app.zip created successfully.
+      ) else (
+        echo ❌ Failed to create app.zip
+        exit /b 1
+      )
+
+      dir
+    '''
+  }
+}
+
 
     stage('Azure Login + Deploy') {
       steps {
