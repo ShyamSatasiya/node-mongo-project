@@ -2,27 +2,45 @@ pipeline {
   agent any
 
   environment {
-  
+    AZURE_CONFIG_DIR = "${WORKSPACE}\\.azure"
   }
 
   stages {
-  stage('Azure Login Only') {
-    steps {
-      withCredentials([
-        string(credentialsId: 'azure-client-id', variable: 'AZ_APPID'),
-        string(credentialsId: 'azure-client-secret', variable: 'AZ_PASS'),
-        string(credentialsId: 'azure-tenant-id', variable: 'AZ_TENANT'),
-        string(credentialsId: 'azure-subscription-id', variable: 'AZ_SUB')
-      ]) {
-        bat '''
-          echo AZ_APPID=%AZ_APPID%
-          echo Logging into Azure...
-          az login --service-principal -u "%AZ_APPID%" -p "%AZ_PASS%" --tenant "%AZ_TENANT%" --output none || exit /b 1
-          az account set --subscription "%AZ_SUB%" || exit /b 1
-          az account show --query "{name:name, id:id}" -o table
-        '''
+    stage('Azure Login Only') {
+      steps {
+        withCredentials([
+          string(credentialsId: 'azure-client-id', variable: 'AZ_APPID'),
+          string(credentialsId: 'azure-client-secret', variable: 'AZ_PASS'),
+          string(credentialsId: 'azure-tenant-id', variable: 'AZ_TENANT'),
+          string(credentialsId: 'azure-subscription-id', variable: 'AZ_SUB')
+        ]) {
+          bat '''
+            setlocal EnableExtensions EnableDelayedExpansion
+
+            rem ===== Create local Azure config dir =====
+            if not exist "%AZURE_CONFIG_DIR%" mkdir "%AZURE_CONFIG_DIR%"
+
+            rem ===== Sanity check on credentials =====
+            echo AZ_APPID=%AZ_APPID:~0,4%****
+            echo AZ_TENANT=%AZ_TENANT:~0,4%****
+            echo AZ_SUB=%AZ_SUB:~0,4%****
+
+            rem ===== Login to Azure =====
+            az login --service-principal ^
+              -u "%AZ_APPID%" ^
+              -p "%AZ_PASS%" ^
+              --tenant "%AZ_TENANT%" --output none || exit /b 1
+
+            rem ===== Set subscription =====
+            az account set --subscription "%AZ_SUB%" || exit /b 1
+
+            rem ===== Confirm account =====
+            az account show --query "{Name:name, ID:id}" -o table || exit /b 1
+
+            echo Azure login successful.
+          '''
+        }
       }
     }
-  }
   }
 }
