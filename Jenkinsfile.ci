@@ -12,7 +12,7 @@ pipeline {
 
   environment {
     REPO_URL = 'https://github.com/Azure-Samples/msdocs-nodejs-mongodb-azure-sample-app.git'
-    ARTIFACT = 'dist/app.zip' // forward slashes for compatibility
+    ARTIFACT = 'dist/app.zip'
   }
 
   stages {
@@ -88,14 +88,10 @@ pipeline {
 
     stage('Package ZIP for Azure') {
       steps {
-        // ✅ Use 7-Zip to avoid Windows metadata in Compress-Archive
         bat '''
-          if exist "C:\\Program Files\\7-Zip\\7z.exe" (
-            "C:\\Program Files\\7-Zip\\7z.exe" a -tzip %ARTIFACT% .\\build\\* || exit /b 1
-          ) else (
-            echo [ERROR] 7-Zip is not installed. Please install it or use Compress-Archive.
-            exit /b 1
-          )
+          rem ZIP only the contents of build/ (not the folder)
+          powershell -NoProfile -Command ^
+            "Get-ChildItem -Path 'build\\' | Compress-Archive -DestinationPath 'dist/app.zip' -Force"
           dir dist
         '''
       }
