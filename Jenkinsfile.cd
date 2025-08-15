@@ -13,7 +13,7 @@ pipeline {
 
   stages {
 
-      stage('Prepare Deployable ZIP') {
+        stage('Prepare Deployable ZIP') {
       steps {
         powershell '''
           Remove-Item -Force app.zip -ErrorAction SilentlyContinue
@@ -23,15 +23,15 @@ pipeline {
           New-Item -ItemType Directory -Path $tempPath | Out-Null
 
           $include = @(
-            "package.json",
-            "package-lock.json",
-            "server.js",
-            "app.js",
-            "routes",
-            "views",
-            "public",
-            "controllers",
-            "models"
+            'package.json',
+            'package-lock.json',
+            'server.js',
+            'app.js',
+            'routes',
+            'views',
+            'public',
+            'controllers',
+            'models'
           )
 
           Write-Host "📦 Copying files to $tempPath"
@@ -49,12 +49,13 @@ pipeline {
           if (Test-Path "app.zip") {
             Write-Host "✅ app.zip created successfully."
           } else {
-            Write-Error "Failed to create app.zip"
+            Write-Host '❌ Failed to create app.zip'
             exit 1
           }
         '''
       }
     }
+
 
 
     stage('Deploy to Azure Web App') {
