@@ -13,7 +13,7 @@ pipeline {
 
   stages {
 
-    stage('Prepare Deployable ZIP') {
+      stage('Prepare Deployable ZIP') {
       steps {
         powershell '''
           Remove-Item -Force app.zip -ErrorAction SilentlyContinue
@@ -49,12 +49,13 @@ pipeline {
           if (Test-Path "app.zip") {
             Write-Host "✅ app.zip created successfully."
           } else {
-            Write-Error "❌ Failed to create app.zip"
+            Write-Error "Failed to create app.zip"
             exit 1
           }
         '''
       }
     }
+
 
     stage('Deploy to Azure Web App') {
       steps {
