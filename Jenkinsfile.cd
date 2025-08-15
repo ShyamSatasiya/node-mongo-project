@@ -5,46 +5,32 @@ pipeline {
     AZURE_CONFIG_DIR = "${WORKSPACE}\\.azure"
     APP_NAME = "node-mongo-sample-webapp"
     RG_NAME = "rg-node-mongo-jenkins"
+    PLAN_NAME = "node-mongo-sample-webapp-plan"
     LOCATION = "canadacentral"
-    ZIP_FILE = "app.zip"
+    ZIP_SOURCE = "app.zip"
     HEALTH_PATH = "/"
   }
 
   stages {
 
-    stage('Prepare app.zip with root files') {
-      steps {
-        powershell '''
-          Remove-Item -Force app.zip -ErrorAction SilentlyContinue
-
-          # Copy necessary files to a temp folder
-          $source = "$PWD"
-          $temp = "$env:TEMP\\appzip"
-          Remove-Item -Recurse -Force $temp -ErrorAction SilentlyContinue
-          New-Item -ItemType Directory -Path $temp | Out-Null
-
-          $include = @('package.json', 'package-lock.json', 'app.js', 'server.js', 'node_modules', 'public', 'views', 'routes', 'controllers')
-          foreach ($item in $include) {
-            $srcPath = Join-Path $source $item
-            if (Test-Path $srcPath) {
-              Copy-Item $srcPath -Destination $temp -Recurse -Force
-            }
-          }
-
-          # Create the zip with flat root (NOT inside "dist" or subfolder)
-          Compress-Archive -Path "$temp\\*" -DestinationPath "app.zip" -Force
-
-          if (Test-Path "app.zip") {
-            Write-Host "✅ app.zip created at root level."
-          } else {
-            Write-Host "❌ Failed to create app.zip"
-            exit 1
-          }
-        '''
+stage('Prepare ZIP from root') {
+  steps {
+    powershell '''
+      Remove-Item -Force app.zip -ErrorAction SilentlyContinue
+      Compress-Archive -Path * -DestinationPath app.zip -Force
+      if (Test-Path "app.zip") {
+        Write-Host "app.zip created successfully."
+      } else {
+        Write-Host "[ERROR] Failed to create app.zip"
+        exit 1
       }
-    }
+    '''
+  }
+}
 
-    stage('Azure Login + Deploy') {
+
+
+    stage('Verify and Deploy to Azure') {
       steps {
         withCredentials([
           string(credentialsId: 'azure-client-id', variable: 'AZ_APPID'),
@@ -55,27 +41,38 @@ pipeline {
           bat '''
             setlocal EnableExtensions EnableDelayedExpansion
 
+            echo 🔐 Logging in to Azure...
+
+            rem ===== Setup Azure config dir =====
             if not exist "%AZURE_CONFIG_DIR%" mkdir "%AZURE_CONFIG_DIR%"
 
-            echo Logging in to Azure...
+            rem ===== Login to Azure =====
             call az login --service-principal -u "%AZ_APPID%" -p "%AZ_PASS%" --tenant "%AZ_TENANT%" || exit /b 1
+
+            rem ===== Set subscription =====
             call az account set --subscription "%AZ_SUB%" || exit /b 1
 
-            echo Validating app.zip presence...
-            if not exist "%ZIP_FILE%" (
-              echo ❌ app.zip not found.
+            rem ===== Confirm account =====
+            call az account show --query "{Name:name, ID:id}" -o table || exit /b 1
+
+            rem ===== Check for app.zip =====
+            if not exist "%ZIP_SOURCE%" (
+              echo [ERROR] File %ZIP_SOURCE% not found
               dir
               exit /b 1
             )
 
-            echo Deploying app.zip to Azure Web App...
+            echo 🚀 Deploying to Azure Web App...
+
+            rem ===== Deploy ZIP to Azure =====
             call az webapp deployment source config-zip ^
               --resource-group "%RG_NAME%" ^
               --name "%APP_NAME%" ^
-              --src "%ZIP_FILE%" || exit /b 1
+              --src "%ZIP_SOURCE%" || exit /b 1
 
+            rem ===== Show App URL =====
             set APP_URL=https://%APP_NAME%.azurewebsites.net%HEALTH_PATH%
-            echo ✅ Deployed successfully at: !APP_URL!
+            echo ✅ Deployed to: !APP_URL!
           '''
         }
       }
@@ -90,7 +87,7 @@ pipeline {
       echo "✅ Deployment succeeded!"
     }
     failure {
-      echo "❌ Deployment failed. Check Jenkins log and ZIP structure."
+      echo "❌ Deployment failed. Check Jenkins logs."
     }
   }
 }
