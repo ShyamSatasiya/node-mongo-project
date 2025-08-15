@@ -3,10 +3,10 @@ pipeline {
 
   environment {
     AZURE_CONFIG_DIR = "${WORKSPACE}\\.azure"
-    APP_NAME = "node-mongo-app"
-    RG_NAME = "node-mongo-rg"
-    PLAN_NAME = "node-mongo-plan"
-    LOCATION = "eastus"
+    APP_NAME = "node-mongo-sample-webapp"
+    RG_NAME = "rg-node-mongo-jenkins"
+    PLAN_NAME = "node-mongo-sample-webapp-plan"
+    LOCATION = "canadacentral"
     ZIP_FILE = "app.zip" // assumes the file exists in workspace
     HEALTH_PATH = "/"
   }
@@ -31,34 +31,20 @@ pipeline {
             echo AZ_TENANT=%AZ_TENANT:~0,4%****
             echo AZ_SUB=%AZ_SUB:~0,4%****
 
-            rem ===== Login to Azure =====
-az login --service-principal -u "%AZ_APPID%" -p "%AZ_PASS%" --tenant "%AZ_TENANT%"
-echo [DEBUG] az login exit code: %errorlevel%
+           rem ===== Login to Azure =====
+call az login --service-principal -u "%AZ_APPID%" -p "%AZ_PASS%" --tenant "%AZ_TENANT%"
 if errorlevel 1 (
   echo [ERROR] Azure login failed
   exit /b 1
 )
 
-            rem ===== Set subscription =====
-            az account set --subscription "%AZ_SUB%" || exit /b 1
+rem ===== Set subscription =====
+call az account set --subscription "%AZ_SUB%" || exit /b 1
 
-            rem ===== Confirm account =====
-            az account show --query "{Name:name, ID:id}" -o table || exit /b 1
+rem ===== Confirm account =====
+call az account show --query "{Name:name, ID:id}" -o table || exit /b 1
 
-            rem ===== Create Resource Group =====
-            az group create --name "%RG_NAME%" --location "%LOCATION%" --output none || exit /b 1
-
-            rem ===== Create App Service Plan =====
-            az appservice plan create --name "%PLAN_NAME%" ^
-              --resource-group "%RG_NAME%" ^
-              --sku B1 --is-linux --output none || exit /b 1
-
-            rem ===== Create Web App =====
-            az webapp create --name "%APP_NAME%" ^
-              --resource-group "%RG_NAME%" ^
-              --plan "%PLAN_NAME%" ^
-              --runtime "NODE|18-lts" ^
-              --output none || exit /b 1
+            
 
             rem ===== Deploy ZIP to Web App =====
             if not exist "%ZIP_FILE%" (
