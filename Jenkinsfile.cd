@@ -9,71 +9,38 @@ pipeline {
   }
 
   stages {
-   stage('Login + Configure + Deploy + Verify') {
-  steps {
-    bat '''
-      setlocal EnableExtensions EnableDelayedExpansion
+    stage('Azure Login Only') {
+      steps {
+        bat '''
+          setlocal EnableExtensions EnableDelayedExpansion
 
-      rem ===== Use a local az config (writable by Jenkins) =====
-      set "AZURE_CONFIG_DIR=%cd%\\.azure"
-      if not exist "%AZURE_CONFIG_DIR%" mkdir "%AZURE_CONFIG_DIR%"
+          rem ===== Configure Azure CLI to use local config dir =====
+          set "AZURE_CONFIG_DIR=%cd%\\.azure"
+          if not exist "%AZURE_CONFIG_DIR%" mkdir "%AZURE_CONFIG_DIR%"
 
-      echo.
-      echo === WHOAMI ===
-      whoami
-      echo AZURE_CONFIG_DIR=%AZURE_CONFIG_DIR%
-      echo AZ_APPID=%AZ_APPID:~0,4%****
-      echo AZ_TENANT=%AZ_TENANT:~0,4%****
-      echo AZ_SUB=%AZ_SUB:~0,4%****
+          rem ===== Check AZ CLI installed =====
+          az --version || (echo [ERROR] Azure CLI missing & exit /b 1)
 
-      echo.
-      echo === STEP 1: Azure CLI check ===
-      az --version || (echo [ERROR] Azure CLI not found & exit /b 1)
+          rem ===== Try login =====
+          echo Logging into Azure...
+          az login --service-principal -u "%AZ_APPID%" -p "%AZ_PASS%" --tenant "%AZ_TENANT%" --output none
+          if errorlevel 1 (
+            echo [ERROR] Login failed
+            exit /b 1
+          )
 
-      echo.
-      echo === STEP 2: Logout and Login ===
-      az logout >nul 2>nul
-      echo Logged out (if any active session)
-      az login --service-principal -u "%AZ_APPID%" -p "%AZ_PASS%" --tenant "%AZ_TENANT%" --output none
-      if errorlevel 1 (
-        echo [ERROR] Login failed
-        exit /b 1
-      )
+          echo Login successful.
 
-      echo.
-      echo === STEP 3: Set Subscription ===
-      az account set --subscription "%AZ_SUB%" --output none
-      if errorlevel 1 (
-        echo [ERROR] az account set failed
-        exit /b 1
-      )
-      for /f "usebackq delims=" %%s in (`az account show --query id -o tsv`) do set ACTIVE_SUB=%%s
-      echo Active Subscription: %ACTIVE_SUB%
+          rem ===== Set subscription =====
+          az account set --subscription "%AZ_SUB%"
+          if errorlevel 1 (
+            echo [ERROR] Failed to set subscription
+            exit /b 1
+          )
 
-      echo.
-      echo === STEP 4: Resolve Web App ===
-      set "APP_NAME=node-mongo-sample-webapp"
-      for /f "usebackq delims=" %%i in (`az webapp list --query "[?name=='%APP_NAME%'] | [0].id" -o tsv`) do set APP_ID=%%i
-      for /f "usebackq delims=" %%h in (`az webapp list --query "[?name=='%APP_NAME%'] | [0].defaultHostName" -o tsv`) do set FQDN=%%h
-      if not defined APP_ID (
-        echo [ERROR] Web app not found: %APP_NAME%
-        exit /b 1
-      )
-      echo Resolved App ID: %APP_ID%
-      echo FQDN: %FQDN%
-
-      echo.
-      echo === STEP 5: Probe App ===
-      az webapp show --ids "%APP_ID%" --query "state" -o tsv
-
-      echo.
-      echo === STEP 6: DONE — Logged in and App Resolved ===
-      endlocal
-    '''
-  }
-}
-
-
-
+          az account show --query "{name:name, id:id}" -o table
+        '''
+      }
+    }
   }
 }
