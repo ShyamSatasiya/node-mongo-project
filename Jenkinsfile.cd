@@ -3,10 +3,16 @@ pipeline {
 
   environment {
     AZURE_CONFIG_DIR = "${WORKSPACE}\\.azure"
+    APP_NAME = "node-mongo-app"
+    RG_NAME = "node-mongo-rg"
+    PLAN_NAME = "node-mongo-plan"
+    LOCATION = "eastus"
+    ZIP_FILE = "app.zip" // assumes the file exists in workspace
+    HEALTH_PATH = "/"
   }
 
   stages {
-    stage('Azure Login Only') {
+    stage('Azure Login + Deploy') {
       steps {
         withCredentials([
           string(credentialsId: 'azure-client-id', variable: 'AZ_APPID'),
@@ -17,10 +23,10 @@ pipeline {
           bat '''
             setlocal EnableExtensions EnableDelayedExpansion
 
-            rem ===== Create local Azure config dir =====
+            rem ===== Setup Azure config dir =====
             if not exist "%AZURE_CONFIG_DIR%" mkdir "%AZURE_CONFIG_DIR%"
 
-            rem ===== Sanity check on credentials =====
+            rem ===== Masked sanity check =====
             echo AZ_APPID=%AZ_APPID:~0,4%****
             echo AZ_TENANT=%AZ_TENANT:~0,4%****
             echo AZ_SUB=%AZ_SUB:~0,4%****
@@ -37,10 +43,62 @@ pipeline {
             rem ===== Confirm account =====
             az account show --query "{Name:name, ID:id}" -o table || exit /b 1
 
-            echo Azure login successful.
+            rem ===== Create Resource Group =====
+            az group create --name "%RG_NAME%" --location "%LOCATION%" --output none || exit /b 1
+
+            rem ===== Create App Service Plan =====
+            az appservice plan create --name "%PLAN_NAME%" ^
+              --resource-group "%RG_NAME%" ^
+              --sku B1 --is-linux --output none || exit /b 1
+
+            rem ===== Create Web App =====
+            az webapp create --name "%APP_NAME%" ^
+              --resource-group "%RG_NAME%" ^
+              --plan "%PLAN_NAME%" ^
+              --runtime "NODE|18-lts" ^
+              --output none || exit /b 1
+
+            rem ===== Deploy ZIP to Web App =====
+            if not exist "%ZIP_FILE%" (
+              echo [ERROR] File %ZIP_FILE% not found
+              exit /b 1
+            )
+            az webapp deploy --name "%APP_NAME%" ^
+              --resource-group "%RG_NAME%" ^
+              --src-path "%ZIP_FILE%" ^
+              --type zip || exit /b 1
+
+            rem ===== Show App URL =====
+            set APP_URL=https://%APP_NAME%.azurewebsites.net%HEALTH_PATH%
+            echo Deployed to: !APP_URL!
+
+            rem ===== Health check =====
+            for /l %%i in (1,1,10) do (
+              echo Checking health attempt %%i ...
+              powershell -Command "(Invoke-WebRequest -Uri '!APP_URL!' -UseBasicParsing).StatusCode" > nul 2>&1 && (
+                echo App is healthy.
+                exit /b 0
+              )
+              timeout /t 6 > nul
+            )
+
+            echo [ERROR] Health check failed.
+            exit /b 1
           '''
         }
       }
+    }
+  }
+
+  post {
+    always {
+      bat 'az logout || exit /b 0'
+    }
+    success {
+      echo "✅ Deployment succeeded and health check passed."
+    }
+    failure {
+      echo "❌ Deployment failed. Check Jenkins logs."
     }
   }
 }
