@@ -32,7 +32,11 @@ pipeline {
             echo AZ_SUB=%AZ_SUB:~0,4%****
 
             rem ===== Login to Azure =====
-            az login --service-principal -u "%AZ_APPID%" -p "%AZ_PASS%" --tenant "%AZ_TENANT%" 
+           az login --service-principal -u "%AZ_APPID%" -p "%AZ_PASS%" --tenant "%AZ_TENANT%" >nul 2>&1
+if errorlevel 1 (
+  echo [ERROR] Azure login failed
+  exit /b 1
+)
 
             rem ===== Set subscription =====
             az account set --subscription "%AZ_SUB%" || exit /b 1
