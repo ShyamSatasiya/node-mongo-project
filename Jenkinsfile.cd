@@ -13,24 +13,39 @@ pipeline {
 
   stages {
 
-stage('Prepare ZIP from root') {
-  steps {
-    powershell '''
-      Remove-Item -Force app.zip -ErrorAction SilentlyContinue
-      Compress-Archive -Path * -DestinationPath app.zip -Force
-      if (Test-Path "app.zip") {
-        Write-Host "app.zip created successfully."
-      } else {
-        Write-Host "[ERROR] Failed to create app.zip"
-        exit 1
+    stage('Prepare Clean ZIP') {
+      steps {
+        powershell '''
+          Remove-Item -Force app.zip -ErrorAction SilentlyContinue
+
+          $tempPath = "$env:TEMP\\deploy"
+          Remove-Item -Recurse -Force $tempPath -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $tempPath | Out-Null
+
+          $include = @(
+            "package.json", "package-lock.json", "server.js", "app.js",
+            "routes", "views", "public", "controllers", "models"
+          )
+
+          foreach ($item in $include) {
+            if (Test-Path $item) {
+              Copy-Item $item -Destination $tempPath -Recurse -Force
+            }
+          }
+
+          Compress-Archive -Path "$tempPath\\*" -DestinationPath "app.zip" -Force
+
+          if (Test-Path "app.zip") {
+            Write-Host "✅ app.zip created correctly."
+          } else {
+            Write-Error "❌ Failed to create app.zip"
+            exit 1
+          }
+        '''
       }
-    '''
-  }
-}
+    }
 
-
-
-    stage('Verify and Deploy to Azure') {
+    stage('Deploy to Azure Web App') {
       steps {
         withCredentials([
           string(credentialsId: 'azure-client-id', variable: 'AZ_APPID'),
@@ -41,38 +56,29 @@ stage('Prepare ZIP from root') {
           bat '''
             setlocal EnableExtensions EnableDelayedExpansion
 
-            echo 🔐 Logging in to Azure...
+            echo 🔐 Logging into Azure...
 
-            rem ===== Setup Azure config dir =====
             if not exist "%AZURE_CONFIG_DIR%" mkdir "%AZURE_CONFIG_DIR%"
 
-            rem ===== Login to Azure =====
             call az login --service-principal -u "%AZ_APPID%" -p "%AZ_PASS%" --tenant "%AZ_TENANT%" || exit /b 1
-
-            rem ===== Set subscription =====
             call az account set --subscription "%AZ_SUB%" || exit /b 1
-
-            rem ===== Confirm account =====
             call az account show --query "{Name:name, ID:id}" -o table || exit /b 1
 
-            rem ===== Check for app.zip =====
             if not exist "%ZIP_SOURCE%" (
               echo [ERROR] File %ZIP_SOURCE% not found
               dir
               exit /b 1
             )
 
-            echo 🚀 Deploying to Azure Web App...
+            echo 🚀 Deploying ZIP to Azure...
 
-            rem ===== Deploy ZIP to Azure =====
             call az webapp deployment source config-zip ^
               --resource-group "%RG_NAME%" ^
               --name "%APP_NAME%" ^
               --src "%ZIP_SOURCE%" || exit /b 1
 
-            rem ===== Show App URL =====
             set APP_URL=https://%APP_NAME%.azurewebsites.net%HEALTH_PATH%
-            echo ✅ Deployed to: !APP_URL!
+            echo ✅ Deployed successfully: !APP_URL!
           '''
         }
       }
@@ -87,7 +93,7 @@ stage('Prepare ZIP from root') {
       echo "✅ Deployment succeeded!"
     }
     failure {
-      echo "❌ Deployment failed. Check Jenkins logs."
+      echo "❌ Deployment failed. Check logs."
     }
   }
 }
