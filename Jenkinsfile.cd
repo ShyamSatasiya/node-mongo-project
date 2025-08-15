@@ -12,16 +12,29 @@ pipeline {
   }
 
   stages {
-    stage('Fetch CI Artifact') {
+    stage('Prepare Zip with Correct Paths') {
       steps {
-        copyArtifacts(
-          projectName: 'Node-mongo-webapp', // Replace with your CI job name
-          selector: lastSuccessful(),
-          filter: 'dist/app.zip',
-          target: '.',
-          flatten: true
-        )
-        bat 'dir app.zip'
+        powershell '''
+          Remove-Item -Force app.zip -ErrorAction SilentlyContinue
+
+          $files = Get-ChildItem -Recurse -File
+          $tempDir = "$env:TEMP\\zip-fix"
+          Remove-Item -Recurse -Force $tempDir -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $tempDir | Out-Null
+
+          foreach ($file in $files) {
+            $relative = $file.FullName.Substring($PWD.Path.Length + 1) -replace '\\\\', '/'
+            $destPath = Join-Path $tempDir $relative
+            $destDir = Split-Path $destPath
+            if (-not (Test-Path $destDir)) {
+              New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+            }
+            Copy-Item $file.FullName -Destination $destPath
+          }
+
+          Compress-Archive -Path "$tempDir\\*" -DestinationPath app.zip
+          Remove-Item -Recurse -Force $tempDir
+        '''
       }
     }
 
@@ -39,7 +52,7 @@ pipeline {
             rem ===== Setup Azure config dir =====
             if not exist "%AZURE_CONFIG_DIR%" mkdir "%AZURE_CONFIG_DIR%"
 
-            rem ===== Sanity check =====
+            rem ===== Masked sanity check =====
             echo AZ_APPID=%AZ_APPID:~0,4%****
             echo AZ_TENANT=%AZ_TENANT:~0,4%****
             echo AZ_SUB=%AZ_SUB:~0,4%****
@@ -62,7 +75,7 @@ pipeline {
               echo [ERROR] File %ZIP_FILE% not found
               exit /b 1
             )
-            call az webapp deploy --name "%APP_NAME%" ^
+            az webapp deploy --name "%APP_NAME%" ^
               --resource-group "%RG_NAME%" ^
               --src-path "%ZIP_FILE%" ^
               --type zip || exit /b 1
