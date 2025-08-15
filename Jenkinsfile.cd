@@ -7,24 +7,12 @@ pipeline {
     RG_NAME = "rg-node-mongo-jenkins"
     PLAN_NAME = "node-mongo-sample-webapp-plan"
     LOCATION = "canadacentral"
-    ZIP_FILE = "app.zip"                // will copy this from CI job
+    ZIP_SOURCE = "dist\\app.zip"
     HEALTH_PATH = "/"
   }
 
   stages {
-    stage('Download Artifact from CI') {
-      steps {
-        copyArtifacts(
-          projectName: 'Node-mongo-webapp',    // 🔁 CHANGE THIS IF YOUR CI JOB NAME DIFFERS
-          selector: lastSuccessful(),
-          filter: 'dist/app.zip',
-          target: '.'
-        )
-        bat 'rename dist\\app.zip app.zip'  // rename after copy to root for deploy
-      }
-    }
-
-    stage('Azure Login + Deploy') {
+    stage('Verify and Deploy to Azure') {
       steps {
         withCredentials([
           string(credentialsId: 'azure-client-id', variable: 'AZ_APPID'),
@@ -38,12 +26,13 @@ pipeline {
             rem ===== Setup Azure config dir =====
             if not exist "%AZURE_CONFIG_DIR%" mkdir "%AZURE_CONFIG_DIR%"
 
+            rem ===== Sanity check =====
+            echo AZ_APPID=%AZ_APPID:~0,4%****
+            echo AZ_TENANT=%AZ_TENANT:~0,4%****
+            echo AZ_SUB=%AZ_SUB:~0,4%****
+
             rem ===== Login to Azure =====
-            call az login --service-principal -u "%AZ_APPID%" -p "%AZ_PASS%" --tenant "%AZ_TENANT%"
-            if errorlevel 1 (
-              echo [ERROR] Azure login failed
-              exit /b 1
-            )
+            call az login --service-principal -u "%AZ_APPID%" -p "%AZ_PASS%" --tenant "%AZ_TENANT%" || exit /b 1
 
             rem ===== Set subscription =====
             call az account set --subscription "%AZ_SUB%" || exit /b 1
@@ -51,15 +40,18 @@ pipeline {
             rem ===== Confirm account =====
             call az account show --query "{Name:name, ID:id}" -o table || exit /b 1
 
-            rem ===== Deploy ZIP to Web App =====
-            if not exist "%ZIP_FILE%" (
-              echo [ERROR] File %ZIP_FILE% not found
+            rem ===== Check for app.zip =====
+            if not exist "%ZIP_SOURCE%" (
+              echo [ERROR] File %ZIP_SOURCE% not found
+              dir
               exit /b 1
             )
+
+            rem ===== Deploy ZIP to Azure =====
             call az webapp deployment source config-zip ^
               --resource-group "%RG_NAME%" ^
               --name "%APP_NAME%" ^
-              --src "%ZIP_FILE%" || exit /b 1
+              --src "%ZIP_SOURCE%" || exit /b 1
 
             rem ===== Show App URL =====
             set APP_URL=https://%APP_NAME%.azurewebsites.net%HEALTH_PATH%
@@ -75,10 +67,10 @@ pipeline {
       bat 'az logout || exit /b 0'
     }
     success {
-      echo "✅ Deployment succeeded and health check passed."
+      echo "✅ Deployment succeeded!"
     }
     failure {
-      echo "❌ Deployment failed. Check Jenkins logs."
+      echo "❌ Deployment failed."
     }
   }
 }
