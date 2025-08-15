@@ -13,13 +13,16 @@ pipeline {
 
   stages {
 
-stage('Prepare ZIP from root') {
+stage('Prepare App ZIP') {
   steps {
     powershell '''
       Remove-Item -Force app.zip -ErrorAction SilentlyContinue
+
+      # Include all project files: app.js, package.json, node_modules (if built), etc.
       Compress-Archive -Path * -DestinationPath app.zip -Force
+
       if (Test-Path "app.zip") {
-        Write-Host "app.zip created successfully."
+        Write-Host "✅ app.zip created successfully."
       } else {
         Write-Host "[ERROR] Failed to create app.zip"
         exit 1
