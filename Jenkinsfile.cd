@@ -7,41 +7,22 @@ pipeline {
     RG_NAME = "rg-node-mongo-jenkins"
     PLAN_NAME = "node-mongo-sample-webapp-plan"
     LOCATION = "canadacentral"
-    ZIP_FILE = "app.zip"
+    ZIP_FILE = "app.zip"                // will copy this from CI job
     HEALTH_PATH = "/"
   }
 
   stages {
-  stage('Package App into ZIP') {
-  steps {
-    bat '''
-      rem Clean old zip
-      if exist app.zip del /f /q app.zip
-
-      rem Check if build folder exists
-      if not exist build (
-        echo [ERROR] build directory does not exist
-        dir
-        exit /b 1
-      )
-
-      rem Create zip from build contents
-      powershell -NoProfile -Command ^
-        "Compress-Archive -Path 'build\\*' -DestinationPath 'app.zip' -Force"
-
-      rem Confirm zip was created
-      if exist app.zip (
-        echo ✅ app.zip created successfully.
-      ) else (
-        echo ❌ Failed to create app.zip
-        exit /b 1
-      )
-
-      dir
-    '''
-  }
-}
-
+    stage('Download Artifact from CI') {
+      steps {
+        copyArtifacts(
+          projectName: 'node-mongo-ci',    // 🔁 CHANGE THIS IF YOUR CI JOB NAME DIFFERS
+          selector: lastSuccessful(),
+          filter: 'dist/app.zip',
+          target: '.'
+        )
+        bat 'rename dist\\app.zip app.zip'  // rename after copy to root for deploy
+      }
+    }
 
     stage('Azure Login + Deploy') {
       steps {
@@ -56,11 +37,6 @@ pipeline {
 
             rem ===== Setup Azure config dir =====
             if not exist "%AZURE_CONFIG_DIR%" mkdir "%AZURE_CONFIG_DIR%"
-
-            rem ===== Sanity check =====
-            echo AZ_APPID=%AZ_APPID:~0,4%****
-            echo AZ_TENANT=%AZ_TENANT:~0,4%****
-            echo AZ_SUB=%AZ_SUB:~0,4%****
 
             rem ===== Login to Azure =====
             call az login --service-principal -u "%AZ_APPID%" -p "%AZ_PASS%" --tenant "%AZ_TENANT%"
