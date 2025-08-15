@@ -20,23 +20,24 @@ pipeline {
           echo AZ_SUB=%AZ_SUB:~0,4%****
 
           rem ===== Azure login =====
-          az --version || exit /b 1
+          echo Logging into Azure...
+          az login --service-principal ^
+            -u "%AZ_APPID%" ^
+            -p "%AZ_PASS%" ^
+            --tenant "%AZ_TENANT%" --output none || exit /b 1
 
-          echo ===== Logging into Azure =====
-          az login --service-principal -u "%AZ_APPID%" -p "%AZ_PASS%" --tenant "%AZ_TENANT%" || exit /b 1
-
-          echo ===== Setting subscription =====
+          echo Setting subscription...
           az account set --subscription "%AZ_SUB%" || exit /b 1
 
-          echo ===== Verify identity =====
-          az account show --output table
+          echo Current account:
+          az account show --output table || exit /b 1
 
-          rem ===== Deploy (example) =====
-          az group create --name node-mongo-rg --location eastus
-          az appservice plan create --name node-mongo-plan --resource-group node-mongo-rg --sku B1 --is-linux
-          az webapp create --name node-mongo-app --resource-group node-mongo-rg --plan node-mongo-plan --runtime "NODE|18-lts"
+          echo ===== Deployment example =====
+          az group create --name node-mongo-rg --location eastus --output none
+          az appservice plan create --name node-mongo-plan --resource-group node-mongo-rg --sku B1 --is-linux --output none
+          az webapp create --name node-mongo-app --resource-group node-mongo-rg --plan node-mongo-plan --runtime "NODE|18-lts" --output none
 
-          echo ===== Deployment complete =====
+          echo Deployment complete!
         '''
       }
     }
