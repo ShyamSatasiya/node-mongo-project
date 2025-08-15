@@ -1,45 +1,84 @@
 pipeline {
-  agent any
+    agent any
 
-  environment {
-    AZ_APPID  = credentials('azure-client-id')
-    AZ_PASS   = credentials('azure-client-secret')
-    AZ_TENANT = credentials('azure-tenant-id')
-    AZ_SUB    = credentials('azure-subscription-id')
-  }
+    environment {
+        // These will be injected from Jenkins credentials / secrets
+        AZURE_CLIENT_ID     = credentials('AZ_APPID')      // Service Principal App ID
+        AZURE_CLIENT_SECRET = credentials('AZ_PASS')       // Service Principal Password
+        AZURE_TENANT_ID     = credentials('AZ_TENANT')     // Tenant ID
+        AZURE_SUBSCRIPTION  = credentials('AZ_SUB')        // Subscription ID
 
-  stages {
-    stage('Login + Configure + Deploy + Verify') {
-      steps {
-        bat '''
-          setlocal EnableExtensions EnableDelayedExpansion
-          
-          echo ===== Validating secrets =====
-          echo AZ_APPID=%AZ_APPID:~0,4%****
-          echo AZ_TENANT=%AZ_TENANT:~0,4%****
-          echo AZ_SUB=%AZ_SUB:~0,4%****
-
-          rem ===== Azure login =====
-          echo Logging into Azure...
-          az login --service-principal ^
-            -u "%AZ_APPID%" ^
-            -p "%AZ_PASS%" ^
-            --tenant "%AZ_TENANT%" --output none || exit /b 1
-
-          echo Setting subscription...
-          az account set --subscription "%AZ_SUB%" || exit /b 1
-
-          echo Current account:
-          az account show --output table || exit /b 1
-
-          echo ===== Deployment example =====
-          az group create --name node-mongo-rg --location eastus --output none
-          az appservice plan create --name node-mongo-plan --resource-group node-mongo-rg --sku B1 --is-linux --output none
-          az webapp create --name node-mongo-app --resource-group node-mongo-rg --plan node-mongo-plan --runtime "NODE|18-lts" --output none
-
-          echo Deployment complete!
-        '''
-      }
+        AZURE_WEBAPP_NAME   = "your-webapp-name"           // <-- change to your Web App
+        AZURE_RESOURCE_GROUP = "your-resource-group"       // <-- change accordingly
     }
-  }
+
+    stages {
+        stage('Login + Configure') {
+            steps {
+                bat '''
+                    echo ===== Azure CLI Login =====
+                    set AZURE_CLIENT_ID=%AZURE_CLIENT_ID%
+                    set AZURE_CLIENT_SECRET=%AZURE_CLIENT_SECRET%
+                    set AZURE_TENANT_ID=%AZURE_TENANT_ID%
+                    set AZURE_SUBSCRIPTION_ID=%AZURE_SUBSCRIPTION%
+
+                    echo Logging in...
+                    az login --service-principal ^
+                        --username %AZURE_CLIENT_ID% ^
+                        --password %AZURE_CLIENT_SECRET% ^
+                        --tenant %AZURE_TENANT_ID% ^
+                        --output none || exit /b 1
+
+                    echo Setting subscription...
+                    az account set --subscription %AZURE_SUBSCRIPTION_ID% || exit /b 1
+
+                    echo Current account:
+                    az account show --output table
+                '''
+            }
+        }
+
+        stage('Build') {
+            steps {
+                bat '''
+                    echo ===== Installing Dependencies =====
+                    call npm install
+
+                    echo ===== Building App =====
+                    call npm run build || echo No build step, skipping...
+                '''
+            }
+        }
+
+        stage('Package') {
+            steps {
+                bat '''
+                    echo ===== Packaging App =====
+                    if exist package.zip del /f /q package.zip
+                    powershell -Command "Compress-Archive -Path * -DestinationPath package.zip -Force"
+                '''
+            }
+        }
+
+        stage('Deploy') {
+            steps {
+                bat '''
+                    echo ===== Deploying to Azure Web App =====
+                    az webapp deployment source config-zip ^
+                        --resource-group %AZURE_RESOURCE_GROUP% ^
+                        --name %AZURE_WEBAPP_NAME% ^
+                        --src package.zip
+                '''
+            }
+        }
+
+        stage('Verify') {
+            steps {
+                bat '''
+                    echo ===== Verifying Deployment =====
+                    az webapp show -g %AZURE_RESOURCE_GROUP% -n %AZURE_WEBAPP_NAME% --query state -o tsv
+                '''
+            }
+        }
+    }
 }
