@@ -8,8 +8,8 @@ pipeline {
         AZURE_TENANT_ID     = credentials('AZ_TENANT')     // Tenant ID
         AZURE_SUBSCRIPTION  = credentials('AZ_SUB')        // Subscription ID
 
-        AZURE_WEBAPP_NAME   = "your-webapp-name"           // <-- change to your Web App
-        AZURE_RESOURCE_GROUP = "your-resource-group"       // <-- change accordingly
+        AZURE_WEBAPP_NAME   = "node-mongo-sample-webapp"           // <-- change to your Web App
+        AZURE_RESOURCE_GROUP = "rg-node-mongo-jenkins"       // <-- change accordingly
     }
 
     stages {
