@@ -2,45 +2,27 @@ pipeline {
   agent any
 
   environment {
-    AZ_APPID  = credentials('azure-client-id')
-    AZ_PASS   = credentials('azure-client-secret')
-    AZ_TENANT = credentials('azure-tenant-id')
-    AZ_SUB    = credentials('azure-subscription-id')
+  
   }
 
   stages {
-    stage('Azure Login Only') {
-      steps {
+  stage('Azure Login Only') {
+    steps {
+      withCredentials([
+        string(credentialsId: 'azure-client-id', variable: 'AZ_APPID'),
+        string(credentialsId: 'azure-client-secret', variable: 'AZ_PASS'),
+        string(credentialsId: 'azure-tenant-id', variable: 'AZ_TENANT'),
+        string(credentialsId: 'azure-subscription-id', variable: 'AZ_SUB')
+      ]) {
         bat '''
-          setlocal EnableExtensions EnableDelayedExpansion
-
-          rem ===== Configure Azure CLI to use local config dir =====
-          set "AZURE_CONFIG_DIR=%cd%\\.azure"
-          if not exist "%AZURE_CONFIG_DIR%" mkdir "%AZURE_CONFIG_DIR%"
-
-          rem ===== Check AZ CLI installed =====
-          az --version || (echo [ERROR] Azure CLI missing & exit /b 1)
-
-          rem ===== Try login =====
+          echo AZ_APPID=%AZ_APPID%
           echo Logging into Azure...
-          az login --service-principal -u "%AZ_APPID%" -p "%AZ_PASS%" --tenant "%AZ_TENANT%" --output none
-          if errorlevel 1 (
-            echo [ERROR] Login failed
-            exit /b 1
-          )
-
-          echo Login successful.
-
-          rem ===== Set subscription =====
-          az account set --subscription "%AZ_SUB%"
-          if errorlevel 1 (
-            echo [ERROR] Failed to set subscription
-            exit /b 1
-          )
-
+          az login --service-principal -u "%AZ_APPID%" -p "%AZ_PASS%" --tenant "%AZ_TENANT%" --output none || exit /b 1
+          az account set --subscription "%AZ_SUB%" || exit /b 1
           az account show --query "{name:name, id:id}" -o table
         '''
       }
     }
+  }
   }
 }
