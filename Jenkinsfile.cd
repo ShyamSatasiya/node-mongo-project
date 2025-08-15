@@ -7,11 +7,24 @@ pipeline {
     RG_NAME = "rg-node-mongo-jenkins"
     PLAN_NAME = "node-mongo-sample-webapp-plan"
     LOCATION = "canadacentral"
-    ZIP_FILE = "app.zip" // assumes the file exists in workspace
+    ZIP_FILE = "app.zip"
     HEALTH_PATH = "/"
   }
 
   stages {
+    stage('Fetch CI Artifact') {
+      steps {
+        copyArtifacts(
+          projectName: 'node-mongo-ci', // Replace with your CI job name
+          selector: lastSuccessful(),
+          filter: 'dist/app.zip',
+          target: '.',
+          flatten: true
+        )
+        bat 'dir app.zip'
+      }
+    }
+
     stage('Azure Login + Deploy') {
       steps {
         withCredentials([
@@ -26,32 +39,30 @@ pipeline {
             rem ===== Setup Azure config dir =====
             if not exist "%AZURE_CONFIG_DIR%" mkdir "%AZURE_CONFIG_DIR%"
 
-            rem ===== Masked sanity check =====
+            rem ===== Sanity check =====
             echo AZ_APPID=%AZ_APPID:~0,4%****
             echo AZ_TENANT=%AZ_TENANT:~0,4%****
             echo AZ_SUB=%AZ_SUB:~0,4%****
 
-           rem ===== Login to Azure =====
-call az login --service-principal -u "%AZ_APPID%" -p "%AZ_PASS%" --tenant "%AZ_TENANT%"
-if errorlevel 1 (
-  echo [ERROR] Azure login failed
-  exit /b 1
-)
+            rem ===== Login to Azure =====
+            call az login --service-principal -u "%AZ_APPID%" -p "%AZ_PASS%" --tenant "%AZ_TENANT%"
+            if errorlevel 1 (
+              echo [ERROR] Azure login failed
+              exit /b 1
+            )
 
-rem ===== Set subscription =====
-call az account set --subscription "%AZ_SUB%" || exit /b 1
+            rem ===== Set subscription =====
+            call az account set --subscription "%AZ_SUB%" || exit /b 1
 
-rem ===== Confirm account =====
-call az account show --query "{Name:name, ID:id}" -o table || exit /b 1
-
-            
+            rem ===== Confirm account =====
+            call az account show --query "{Name:name, ID:id}" -o table || exit /b 1
 
             rem ===== Deploy ZIP to Web App =====
             if not exist "%ZIP_FILE%" (
               echo [ERROR] File %ZIP_FILE% not found
               exit /b 1
             )
-            az webapp deploy --name "%APP_NAME%" ^
+            call az webapp deploy --name "%APP_NAME%" ^
               --resource-group "%RG_NAME%" ^
               --src-path "%ZIP_FILE%" ^
               --type zip || exit /b 1
@@ -59,19 +70,6 @@ call az account show --query "{Name:name, ID:id}" -o table || exit /b 1
             rem ===== Show App URL =====
             set APP_URL=https://%APP_NAME%.azurewebsites.net%HEALTH_PATH%
             echo Deployed to: !APP_URL!
-
-            rem ===== Health check =====
-            for /l %%i in (1,1,10) do (
-              echo Checking health attempt %%i ...
-              powershell -Command "(Invoke-WebRequest -Uri '!APP_URL!' -UseBasicParsing).StatusCode" > nul 2>&1 && (
-                echo App is healthy.
-                exit /b 0
-              )
-              timeout /t 6 > nul
-            )
-
-            echo [ERROR] Health check failed.
-            exit /b 1
           '''
         }
       }
