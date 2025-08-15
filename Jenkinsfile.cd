@@ -9,37 +9,66 @@ pipeline {
   }
 
   stages {
-    stage('Login + Configure + Deploy + Verify') {
-      steps {
-        bat '''
-          setlocal EnableExtensions EnableDelayedExpansion
-          
-          echo ===== Validating secrets =====
-          echo AZ_APPID=%AZ_APPID:~0,4%****
-          echo AZ_TENANT=%AZ_TENANT:~0,4%****
-          echo AZ_SUB=%AZ_SUB:~0,4%****
+   stage('Login + Configure + Deploy + Verify') {
+  steps {
+    bat '''
+      setlocal EnableExtensions EnableDelayedExpansion
 
-          rem ===== Azure login =====
-          echo Logging into Azure...
-          az login --service-principal ^
-            -u "%AZ_APPID%" ^
-            -p "%AZ_PASS%" ^
-            --tenant "%AZ_TENANT%" --output none || exit /b 1
+      rem ===== Put Azure CLI config in workspace (writeable by Jenkins service) =====
+      set "AZURE_CONFIG_DIR=%cd%\\.azure"
+      if not exist "%AZURE_CONFIG_DIR%" mkdir "%AZURE_CONFIG_DIR%"
 
-          echo Setting subscription...
-          az account set --subscription "%AZ_SUB%" || exit /b 1
+      rem ===== Show masked secrets for sanity (first 4 chars only) =====
+      echo AZ_APPID=%AZ_APPID:~0,4%****
+      echo AZ_TENANT=%AZ_TENANT:~0,4%****
+      echo AZ_SUB=%AZ_SUB:~0,4%****
 
-          echo Current account:
-          az account show --output table || exit /b 1
+      rem ===== Azure CLI sanity =====
+      az --version || (echo [ERROR] Azure CLI not found on PATH & exit /b 1)
+      az cloud set -n AzureCloud || (echo [ERROR] Failed to set cloud AzureCloud & exit /b 1)
 
-          echo ===== Deployment example =====
-          az group create --name node-mongo-rg --location eastus --output none
-          az appservice plan create --name node-mongo-plan --resource-group node-mongo-rg --sku B1 --is-linux --output none
-          az webapp create --name node-mongo-app --resource-group node-mongo-rg --plan node-mongo-plan --runtime "NODE|18-lts" --output none
+      rem ===== Start clean (ignore if not logged in) =====
+      az logout 2>nul
 
-          echo Deployment complete!
-        '''
-      }
-    }
+      rem ===== Login with SP (capture errors to file) =====
+      echo Logging in...
+      az login --service-principal -u "%AZ_APPID%" -p "%AZ_PASS%" --tenant "%AZ_TENANT%" --output none 1>login_out.txt 2>login_err.txt
+      if errorlevel 1 (
+        echo [ERROR] az login failed:
+        type login_err.txt
+        exit /b 1
+      )
+
+      rem ===== Select subscription & verify =====
+      az account set --subscription "%AZ_SUB%" 1>nul 2>acct_err.txt
+      if errorlevel 1 (
+        echo [ERROR] az account set failed:
+        type acct_err.txt
+        exit /b 1
+      )
+
+      for /f "usebackq delims=" %%s in (`az account show --query id -o tsv 2^>nul`) do set ACTIVE_SUB=%%s
+      if not defined ACTIVE_SUB (
+        echo [ERROR] No active subscription after login.
+        az account list -o table
+        exit /b 1
+      )
+      echo Active subscription: %ACTIVE_SUB%
+
+      rem ===== Example deployment (use F1 to avoid quota issues) =====
+      set RG=node-mongo-rg
+      set PLAN=node-mongo-plan
+      set APP=node-mongo-app-%RANDOM%%RANDOM%
+
+      echo Creating RG/Plan/App (F1)...
+      az group create --name %RG% --location eastus --only-show-errors --output none || (echo [ERROR] RG create failed & exit /b 1)
+      az appservice plan create --name %PLAN% --resource-group %RG% --sku F1 --is-linux --only-show-errors --output none || (echo [ERROR] Plan create failed & exit /b 1)
+      az webapp create --name %APP% --resource-group %RG% --plan %PLAN% --runtime "NODE|18-lts" --only-show-errors --output none || (echo [ERROR] WebApp create failed & exit /b 1)
+
+      echo Success! Web App name: %APP%
+    '''
+  }
+}
+
   }
 }
