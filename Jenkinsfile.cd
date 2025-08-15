@@ -32,8 +32,9 @@ pipeline {
             Copy-Item $file.FullName -Destination $destPath
           }
 
-          Compress-Archive -Path "$tempDir\\*" -DestinationPath app.zip
-          Remove-Item -Recurse -Force $tempDir
+          cd build
+Compress-Archive -Path '*' -DestinationPath "..\\%ARTIFACT%" -Force -CompressionLevel Optimal
+
         '''
       }
     }
