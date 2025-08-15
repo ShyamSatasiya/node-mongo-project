@@ -14,61 +14,74 @@ pipeline {
     bat '''
       setlocal EnableExtensions EnableDelayedExpansion
 
-      rem ===== Put Azure CLI config in workspace (writeable by Jenkins service) =====
+      rem ===== Use a local az config (writable by Jenkins) =====
       set "AZURE_CONFIG_DIR=%cd%\\.azure"
       if not exist "%AZURE_CONFIG_DIR%" mkdir "%AZURE_CONFIG_DIR%"
 
-      rem ===== Show masked secrets for sanity (first 4 chars only) =====
+      echo.
+      echo === WHOAMI & ENV ===
+      whoami
+      echo AZURE_CONFIG_DIR=%AZURE_CONFIG_DIR%
       echo AZ_APPID=%AZ_APPID:~0,4%****
       echo AZ_TENANT=%AZ_TENANT:~0,4%****
       echo AZ_SUB=%AZ_SUB:~0,4%****
 
-      rem ===== Azure CLI sanity =====
-      az --version || (echo [ERROR] Azure CLI not found on PATH & exit /b 1)
-      az cloud set -n AzureCloud || (echo [ERROR] Failed to set cloud AzureCloud & exit /b 1)
+      echo.
+      echo === STEP 1: Azure CLI sanity ===
+      az --version || (echo [ERROR] Azure CLI not found & exit /b 1)
+      az cloud set -n AzureCloud || (echo [ERROR] Failed to set cloud & exit /b 1)
 
-      rem ===== Start clean (ignore if not logged in) =====
+      echo.
+      echo === STEP 2: Start clean session ===
       az logout 2>nul
+      if errorlevel 1 echo (no active account to logout is OK)
 
-      rem ===== Login with SP (capture errors to file) =====
-      echo Logging in...
-      az login --service-principal -u "%AZ_APPID%" -p "%AZ_PASS%" --tenant "%AZ_TENANT%" --output none 1>login_out.txt 2>login_err.txt
+      echo.
+      echo === STEP 3: Login with Service Principal ===
+      az login --service-principal -u "%AZ_APPID%" -p "%AZ_PASS%" --tenant "%AZ_TENANT%" --only-show-errors
       if errorlevel 1 (
-        echo [ERROR] az login failed:
-        type login_err.txt
+        echo [ERROR] az login failed
+        type "%AZURE_CONFIG_DIR%\\azureProfile.json" 2>nul
         exit /b 1
       )
 
-      rem ===== Select subscription & verify =====
-      az account set --subscription "%AZ_SUB%" 1>nul 2>acct_err.txt
+      echo.
+      echo === STEP 4: Select subscription ===
+      az account set --subscription "%AZ_SUB%" --only-show-errors
       if errorlevel 1 (
-        echo [ERROR] az account set failed:
-        type acct_err.txt
-        exit /b 1
-      )
-
-      for /f "usebackq delims=" %%s in (`az account show --query id -o tsv 2^>nul`) do set ACTIVE_SUB=%%s
-      if not defined ACTIVE_SUB (
-        echo [ERROR] No active subscription after login.
+        echo [ERROR] az account set failed
         az account list -o table
         exit /b 1
       )
+      for /f "usebackq delims=" %%s in (`az account show --query id -o tsv 2^>nul`) do set ACTIVE_SUB=%%s
       echo Active subscription: %ACTIVE_SUB%
+      if "%ACTIVE_SUB%"=="" (echo [ERROR] No active subscription & exit /b 1)
 
-      rem ===== Example deployment (use F1 to avoid quota issues) =====
-      set RG=node-mongo-rg
-      set PLAN=node-mongo-plan
-      set APP=node-mongo-app-%RANDOM%%RANDOM%
+      echo.
+      echo === STEP 5: Resolve web app by name in this subscription ===
+      set "APP_NAME=node-mongo-sample-webapp"
+      for /f "usebackq delims=" %%i in (`az webapp list --query "[?name=='%APP_NAME%'] | [0].id" -o tsv`) do set APP_ID=%%i
+      for /f "usebackq delims=" %%h in (`az webapp list --query "[?name=='%APP_NAME%'] | [0].defaultHostName" -o tsv`) do set FQDN=%%h
+      if not defined APP_ID (
+        echo [ERROR] App "%APP_NAME%" not found in subscription %ACTIVE_SUB%
+        az webapp list --query "[].{name:name,rg:resourceGroup}" -o table
+        exit /b 1
+      )
+      echo APP_ID=%APP_ID%
+      echo FQDN=%FQDN%
 
-      echo Creating RG/Plan/App (F1)...
-      az group create --name %RG% --location eastus --only-show-errors --output none || (echo [ERROR] RG create failed & exit /b 1)
-      az appservice plan create --name %PLAN% --resource-group %RG% --sku F1 --is-linux --only-show-errors --output none || (echo [ERROR] Plan create failed & exit /b 1)
-      az webapp create --name %APP% --resource-group %RG% --plan %PLAN% --runtime "NODE|18-lts" --only-show-errors --output none || (echo [ERROR] WebApp create failed & exit /b 1)
+      echo.
+      echo === STEP 6: Quick probe (no deploy yet) ===
+      az webapp show --ids "%APP_ID%" --query "state" -o tsv
+      if errorlevel 1 (echo [ERROR] Could not query app & exit /b 1)
 
-      echo Success! Web App name: %APP%
+      echo.
+      echo === DONE: Login OK & app resolved ===
+      endlocal
     '''
   }
 }
+
 
   }
 }
