@@ -13,7 +13,7 @@ pipeline {
 
   stages {
 
-        stage('Prepare Deployable ZIP') {
+    stage('Prepare Deployable ZIP') {
       steps {
         powershell '''
           Remove-Item -Force app.zip -ErrorAction SilentlyContinue
@@ -34,20 +34,20 @@ pipeline {
             'models'
           )
 
-          Write-Host "📦 Copying files to $tempPath"
+          Write-Host '📦 Copying files to temp folder...'
           foreach ($item in $include) {
             if (Test-Path $item) {
-              Write-Host "✅ Including: $item"
+              Write-Host ('✅ Including: ' + $item)
               Copy-Item $item -Destination $tempPath -Recurse -Force
             } else {
-              Write-Host "⚠️ Skipping missing item: $item"
+              Write-Host ('⚠️ Missing item, skipping: ' + $item)
             }
           }
 
           Compress-Archive -Path "$tempPath\\*" -DestinationPath "app.zip" -Force
 
-          if (Test-Path "app.zip") {
-            Write-Host "✅ app.zip created successfully."
+          if (Test-Path 'app.zip') {
+            Write-Host '✅ app.zip created successfully.'
           } else {
             Write-Host '❌ Failed to create app.zip'
             exit 1
@@ -55,8 +55,6 @@ pipeline {
         '''
       }
     }
-
-
 
     stage('Deploy to Azure Web App') {
       steps {
@@ -72,19 +70,18 @@ pipeline {
             echo 🔐 Logging in to Azure...
 
             if not exist "%AZURE_CONFIG_DIR%" mkdir "%AZURE_CONFIG_DIR%"
+
             call az login --service-principal -u "%AZ_APPID%" -p "%AZ_PASS%" --tenant "%AZ_TENANT%" || exit /b 1
             call az account set --subscription "%AZ_SUB%" || exit /b 1
             call az account show --query "{Name:name, ID:id}" -o table || exit /b 1
 
-            echo 🔍 Checking for app.zip...
             if not exist "%ZIP_SOURCE%" (
-              echo ❌ [ERROR] app.zip not found!
+              echo [ERROR] File %ZIP_SOURCE% not found
               dir
               exit /b 1
             )
 
-            echo 🚀 Deploying app.zip to Azure Web App...
-
+            echo 🚀 Deploying ZIP to Azure Web App...
             call az webapp deployment source config-zip ^
               --resource-group "%RG_NAME%" ^
               --name "%APP_NAME%" ^
@@ -103,10 +100,10 @@ pipeline {
       bat 'az logout || exit /b 0'
     }
     success {
-      echo "✅ Deployment completed successfully."
+      echo "✅ Deployment succeeded!"
     }
     failure {
-      echo "❌ Deployment failed. Check above logs for details."
+      echo "❌ Deployment failed. Check logs above."
     }
   }
 }
