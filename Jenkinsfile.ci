@@ -92,9 +92,9 @@ pipeline {
       rem Delete previous zip
       if exist dist\\app.zip del dist\\app.zip
 
-      rem Use PowerShell to zip only the content, NOT the build folder
+      rem Use .NET API to zip the "build" folder contents
       powershell -NoProfile -Command ^
-        "$items = Get-ChildItem -Path 'build' -Recurse -File; Compress-Archive -Path $items.FullName -DestinationPath 'dist/app.zip' -Force"
+        "Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::CreateFromDirectory('build', 'dist/app.zip', 'Optimal', $false)"
 
       dir dist
     '''
