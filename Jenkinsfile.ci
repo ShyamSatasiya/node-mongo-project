@@ -86,20 +86,47 @@ pipeline {
       }
     }
 
-    stage('Package ZIP for Azure') {
+  stage('Package ZIP for Azure') {
   steps {
     bat '''
       rem Delete previous zip
       if exist dist\\app.zip del dist\\app.zip
 
-      rem Use .NET API to zip the "build" folder contents
+      rem Inject web.config (required for Windows App Service to run bin/www)
+      echo ^<?xml version="1.0" encoding="utf-8"?^> > build\\web.config
+      echo ^<configuration^> >> build\\web.config
+      echo ^<system.webServer^> >> build\\web.config
+      echo ^<handlers^> >> build\\web.config
+      echo ^<add name="iisnode" path="bin/www" verb="*" modules="iisnode"/^> >> build\\web.config
+      echo ^</handlers^> >> build\\web.config
+      echo ^<rewrite^> >> build\\web.config
+      echo ^<rules^> >> build\\web.config
+      echo ^<rule name="NodeInspector" patternSyntax="ECMAScript" stopProcessing="true"^> >> build\\web.config
+      echo ^<match url="^bin/www\\/debug[\\/]?" /^> >> build\\web.config
+      echo ^</rule^> >> build\\web.config
+      echo ^<rule name="StaticContent"^> >> build\\web.config
+      echo ^<action type="Rewrite" url="public{REQUEST_URI}"/^> >> build\\web.config
+      echo ^</rule^> >> build\\web.config
+      echo ^<rule name="DynamicContent"^> >> build\\web.config
+      echo ^<conditions^> >> build\\web.config
+      echo ^<add input="{REQUEST_FILENAME}" matchType="IsFile" negate="True"/^> >> build\\web.config
+      echo ^</conditions^> >> build\\web.config
+      echo ^<action type="Rewrite" url="bin/www"/^> >> build\\web.config
+      echo ^</rule^> >> build\\web.config
+      echo ^</rules^> >> build\\web.config
+      echo ^</rewrite^> >> build\\web.config
+      echo ^</system.webServer^> >> build\\web.config
+      echo ^</configuration^> >> build\\web.config
+
+      rem Use PowerShell to zip only the content of build folder (not the folder itself)
       powershell -NoProfile -Command ^
-        "Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::CreateFromDirectory('build', 'dist/app.zip', 'Optimal', $false)"
+        "$items = Get-ChildItem -Path 'build' -Recurse -File; Compress-Archive -Path $items.FullName -DestinationPath 'dist/app.zip' -Force"
 
       dir dist
     '''
   }
 }
+  
 
     stage('Publish Artifact') {
       steps {
