@@ -87,15 +87,19 @@ pipeline {
     }
 
     stage('Package ZIP for Azure') {
-      steps {
-        bat '''
-          rem ZIP only the contents of build/ (not the folder)
-          powershell -NoProfile -Command ^
-            "Get-ChildItem -Path 'build\\' | Compress-Archive -DestinationPath 'dist/app.zip' -Force"
-          dir dist
-        '''
-      }
-    }
+  steps {
+    bat '''
+      rem Delete previous zip
+      if exist dist\\app.zip del dist\\app.zip
+
+      rem Use PowerShell to zip only the content, NOT the build folder
+      powershell -NoProfile -Command ^
+        "$items = Get-ChildItem -Path 'build' -Recurse -File; Compress-Archive -Path $items.FullName -DestinationPath 'dist/app.zip' -Force"
+
+      dir dist
+    '''
+  }
+}
 
     stage('Publish Artifact') {
       steps {
