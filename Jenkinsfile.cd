@@ -3,9 +3,9 @@ pipeline {
 
   environment {
     AZURE_CONFIG_DIR = "${WORKSPACE}\\.azure"
-    APP_NAME = "node-mongo-sample-webapp"
+    APP_NAME = "node-mongo-webapp"
     RG_NAME = "rg-node-mongo-jenkins"
-    PLAN_NAME = "node-mongo-sample-webapp-plan"
+    PLAN_NAME = "ASP-rgnodemongojenkins-97f8"
     LOCATION = "canadacentral"
     ZIP_SOURCE = "dist\\app.zip"
     HEALTH_PATH = "/"
